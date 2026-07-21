@@ -30,3 +30,43 @@ Entries below predate Krishna's formal daily-cycle process — they're backfille
 - **Content volume** — done (10 departments, 10 doctors, 8 articles). Only propose specific new content tied to a real business reason (new specialty, new campaign), not "add more stuff."
 - **Real imagery** — done. Only propose image work for a specific identified gap.
 - **Process/infrastructure** — git workflow and agent team structure are set. Only propose changes here if there's a demonstrated process failure, not a preemptive tweak.
+
+---
+
+## 2026-07-20 — First formal "Krishna, start" batch (12 requirements)
+
+**1. Doctor Availability & Slot Management**
+Doctors can define their weekly availability (days, time blocks, slot duration). The appointment booking flow shows patients only genuinely open slots, not a free-text consultation_hours field. Conflict detection prevents double-booking. Doctors can block out time for leave or non-clinical work.
+
+**2. In-App Notification Center**
+A persistent notification bell/inbox for all authenticated roles. Patients receive: appointment confirmed/cancelled/reminder, lab result ready, new invoice. Doctors receive: new appointment booked for them, lab result ready for their patient. Staff receive: new contact form submission. Admin receives: account actions. In-app only — no real email/SMS (consistent with current out-of-scope). Notifications marked read/unread.
+
+**3. Patient Pre-Visit Intake Form**
+Before each scheduled appointment, the patient is prompted (in their portal) to complete a structured pre-visit questionnaire: chief complaint, symptom duration, known allergies, current medications, pain scale. The completed form is visible to the assigned doctor before the consultation starts. Doctor can see whether a form was submitted or skipped.
+
+**4. Vitals Trend Visualization**
+Staff records vitals per appointment (already specced in STF-4). This requirement adds a visual trend view — a time-series chart of a patient's blood pressure, weight, pulse, and temperature across all visits — accessible to the assigned doctor and to staff. Not just the most recent entry; historical trend plotted over visits/dates.
+
+**5. Inter-Department Referral Management**
+A doctor can create a formal referral from within a patient's record, naming the receiving department and (optionally) a specific doctor. The referral appears in the receiving doctor's portal as a pending referral with patient context (reason, referring doctor, notes). The receiving doctor can accept or decline. On acceptance, a suggested appointment is created or queued. Admin can see all referrals system-wide.
+
+**6. Advanced Analytics & Reporting Dashboard (Admin)**
+Beyond the current count metrics (ADM-8), a proper analytics dashboard with time-series charts: appointments per day/week/month, no-show rate over time, revenue collected vs. outstanding by month, top departments by patient volume, patient acquisition trend. Admin can select date ranges. Data exportable as CSV. This is a business intelligence tool, not a live operational screen.
+
+**7. Public Symptom / Condition Search**
+On the public site, visitors can search by symptom, condition, or keyword (e.g. "chest pain," "knee pain," "skin rash," "vision problems") and receive a list of relevant departments and doctors, ranked by relevance. This is distinct from browsing by department name. Helps patients who don't know which department they need land on the right specialist faster, reducing lost traffic and missed bookings.
+
+**8. Patient Medical Record Export (PDF)**
+A patient can request a complete downloadable PDF summary of their own medical history: visit notes, diagnoses, prescriptions, and lab results, organized by date. The PDF is generated on demand (within the portal), watermarked with the hospital name and patient ID, and is intended for sharing with another provider or insurer. No external email involved — download only.
+
+**9. Appointment Waitlist System**
+When a patient attempts to book a time slot that is already taken, they can join a waitlist for that doctor on that date. If the slot opens (via a cancellation), the next patient on the waitlist receives an in-app notification and has a defined time window (e.g. 2 hours) to confirm the slot before it passes to the next person on the list. If unconfirmed within the window, it cascades to the next waitlisted patient. Admin and Staff can view and manage waitlists.
+
+**10. Discharge Summary & Follow-Up Scheduling**
+When a doctor marks an appointment as Completed, they are prompted (not forced) to generate a discharge/visit summary for the patient: key findings, instructions, medications, and restrictions. The doctor can simultaneously schedule a follow-up appointment directly from this screen without requiring the patient to re-enter the booking flow. The patient sees the discharge summary in their portal under that appointment's record.
+
+**11. Patient Satisfaction Survey & Doctor Ratings**
+After an appointment is marked Completed and a cooling-off period has elapsed (24 hours), the patient receives an in-app prompt to rate their experience: 1–5 star rating for the doctor, 1–5 for overall hospital experience, and an optional free-text comment. A patient can only submit one survey per appointment. Admin sees aggregate ratings and all comments. Doctors see their own aggregate rating and anonymized comments. Individual comment text is never attributed to a specific patient in the doctor's view.
+
+**12. Corporate Health Check Packages (B2B Revenue)**
+A new section on the public site presenting bundled corporate health check packages (e.g. Basic, Comprehensive, Executive tiers), each listing included tests and screenings. Corporate clients (HR managers, procurement officers) fill out a B2B inquiry form (company name, contact, headcount, preferred package). Admin receives these inquiries in the portal and can mark them as Contacted, Proposal Sent, Closed Won, Closed Lost. This is a distinct revenue stream from individual patient care and broadens the hospital's market reach.

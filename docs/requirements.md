@@ -209,8 +209,8 @@ The following are explicitly excluded from this build to keep it a functional de
 - Granular field-level audit logging for every clinical read (only account/role admin actions are audited per ADM-9).
 - Multi-factor authentication, SSO/OAuth login.
 - File storage integration beyond local disk/simple storage for lab result attachments and blog cover images (no cloud CDN, virus scanning, etc.).
-- Data export/interoperability tools (CSV/PDF export of records) beyond what's explicitly listed above.
-- Waitlist management for fully booked doctors.
+- General data export/interoperability tools beyond the patient medical record PDF (REQ-08, Section 9.8) and the admin analytics CSV (REQ-06, Section 9.6) — such as HL7/FHIR feeds, bulk data exports, and CSV export of raw clinical records.
+- ~~Waitlist management for fully booked doctors~~ — now in scope as REQ-09 (Section 9.9).
 - Internationalization / multi-language support.
 
 ---
@@ -1807,3 +1807,662 @@ The following items are explicitly excluded from this build to keep scope bounde
 - Audit-log entries for billing changes — the audit log (ADM-9) covers account/role admin actions only; billing-specific change history is out of scope.
 - Real-time dashboard tile refresh (WebSocket or polling) — tiles show data as of the last page load (standard HTTP, per PERF-CONS-3).
 - Background job queue or retry mechanism for failed notifications — failures are recorded in `email_notifications.status = 'Failed'` and the BillingSpecialist may manually retry via the Resend Notification button (BILL-8).
+
+---
+
+## 9. Batch 2 Requirements — 2026-07-20 (12 New Requirements)
+
+Status: Draft v2.0 — added 2026-07-20 by Lavanya (Phase 1 analysis + Phase 2 documentation).
+Consumers: Solution Architect (Sagar — Phase 3 UX + Phase 4 Technical Design), Backend/Frontend (Chintu — Phase 6 Implementation), QA (Gopal — Phase 8).
+
+This section documents all 12 requirements from Krishna's 2026-07-20 batch. Each requirement is confirmed as genuinely new — no overlap with Sections 1–8. Two previously out-of-scope items are now in scope (see Section 9.13). One pre-existing schema gap (vitals table) is also resolved here (see Section 9.14 and REQ-04).
+
+**Requirement IDs** in this section use the prefix `REQ-` followed by a two-digit batch number. User story IDs extend the existing section-based scheme (e.g., AVL- for availability, NOTIF- for notifications).
+
+**Dependency graph (blocking relationships):**
+- REQ-01 (Availability) must be designed and schema-complete before REQ-09 (Waitlist) or REQ-10 (Follow-Up Scheduling) design begins.
+- REQ-02 (Notification Center) must be designed and schema-complete before REQ-09, REQ-10, REQ-11 design begins.
+- REQ-04 (Vitals Trend) requires the vitals table schema gap (Section 9.14) to be resolved first.
+- All other requirements in this batch are independent of each other and of REQ-01 / REQ-02, unless otherwise noted per requirement.
+
+---
+
+### 9.1 REQ-01 — Doctor Availability & Slot Management (Critical)
+
+**Description**: Replace the existing free-text `consultation_hours` field on the `doctors` table with a machine-readable weekly availability schedule per doctor, configurable slot durations, one-off date blocks, and real-time available-slot querying at booking time. This is the prerequisite foundation for REQ-09 (Waitlist) and REQ-10 (Follow-Up Scheduling).
+
+**Affected roles**: Admin (configure on behalf of any doctor), Doctor (configure own schedule), Patient (queries slots during booking), Staff (queries slots during front-desk booking).
+
+#### User Stories
+
+- AVL-1: As an Admin or Doctor, I can define a weekly recurring availability schedule for a doctor: for each day of the week (Mon–Sun), I can set one or more time windows (start time, end time) during which appointments can be booked.
+- AVL-2: As an Admin or Doctor, I can configure the slot duration (in minutes, e.g., 15, 20, 30, 45, 60) per doctor. The system uses this to divide available windows into discrete bookable slots.
+- AVL-3: As an Admin or Doctor, I can create a one-off availability block for a specific date: either blocking the entire day or a specific time range (e.g., "Dr. Smith is unavailable 2–4pm on July 25"). Blocks override the weekly schedule for that date.
+- AVL-4: As a Patient or Staff member performing a booking, when I select a doctor and a date, the system returns only the time slots that are (a) within the doctor's weekly schedule for that day, (b) not covered by a one-off block, and (c) not already booked by an existing Scheduled or Completed appointment.
+- AVL-5: As a Patient or Staff member, if I attempt to book a slot that has become unavailable between my query and my submission, the booking is rejected with a conflict error (409 Conflict) and the available slots are refreshed.
+- AVL-6: As a Doctor, I can view my own weekly schedule and one-off blocks in my portal.
+- AVL-7: As an Admin, I can view and edit availability and blocks for any doctor.
+
+#### Functional Requirements
+
+- AVLFR-1: A doctor's weekly schedule is stored as day-of-week + start_time + end_time rows (one row per time window per day). Multiple windows per day are allowed (e.g., 9am–12pm and 2pm–5pm).
+- AVLFR-2: Slot duration is stored per doctor (integer, minutes). Default: 30 minutes. Valid values: 10, 15, 20, 30, 45, 60. Requests outside these values are rejected with 400 Bad Request.
+- AVLFR-3: One-off blocks store: doctor_id, block_date (YYYY-MM-DD), optional start_time (HH:MM), optional end_time (HH:MM). If start_time and end_time are both null, the entire day is blocked. If only one of start/end is present, the block is rejected with 400 Bad Request.
+- AVLFR-4: The slot-query endpoint (`GET /doctors/{id}/available-slots?date=YYYY-MM-DD`) returns an ordered list of datetime strings representing the start time of each bookable slot. The list is empty if the doctor has no schedule for that day, if the entire day is blocked, or if all generated slots are already taken.
+- AVLFR-5: The existing `consultation_hours` text field on the `doctors` table is retained for backward-compatibility (public profile display still uses it for a human-readable description) but is no longer the authoritative source of availability. The new schedule tables are authoritative for booking.
+- AVLFR-6: Changes to a doctor's availability (schedule or blocks) do NOT retroactively affect existing booked appointments.
+- AVLFR-7: The booking endpoint (`POST /appointments`) must validate slot availability in the same database transaction as the appointment insert. The existing unique index `uq_appointments_doctor_slot` remains in place as the last-line-of-defense conflict guard.
+
+#### Non-Functional Requirements
+
+- AVLNFR-1: The slot-query endpoint must return results within 500ms for a single date query even with 200+ existing appointments for a doctor in the database.
+- AVLNFR-2: Availability configuration endpoints are role-guarded: Admin and Doctor (own record only) can write; Admin, Doctor (own), Patient, and Staff can read.
+
+#### Acceptance Criteria
+
+- AC-AVL-1: Given a doctor has a weekly schedule of Mon 9:00–12:00 with 30-minute slots, when `GET /doctors/{id}/available-slots?date=2026-07-27` (a Monday) is called and no appointments exist, then the response contains exactly 6 slots: 09:00, 09:30, 10:00, 10:30, 11:00, 11:30.
+- AC-AVL-2: Given the same schedule and an existing Scheduled appointment at 09:30, when the slot query is called, then 09:30 is absent from the response and 5 slots are returned.
+- AC-AVL-3: Given a one-off block exists for 2026-07-27 with no start/end time (full-day block), when the slot query is called for that date, then the response contains an empty list.
+- AC-AVL-4: Given a Patient calls `POST /appointments` with a valid slot, and between the slot query and the booking POST another user books that same slot, then the second booking receives 409 Conflict and no duplicate appointment row is created.
+- AC-AVL-5: Given a doctor has no weekly schedule configured for Wednesday, when the slot query is called for a Wednesday, then the response contains an empty list (not a 404 or 500).
+
+#### Dependencies
+
+- Prerequisite for REQ-09 (Waitlist) and REQ-10 (Follow-Up Scheduling within discharge summary).
+- Integrates with existing Appointment booking flow (PAT-2, STF-1, AC-APT-1, AC-APT-2).
+
+#### Priority: Critical
+
+---
+
+### 9.2 REQ-02 — In-App Notification Center (High)
+
+**Description**: A persistent, role-aware notification inbox stored in the database. All six roles see a bell icon with an unread badge in the authenticated app shell. Notifications are generated server-side in response to defined events. No email or SMS delivery — in-app only. This is the notification foundation for REQ-09, REQ-10, and REQ-11.
+
+**Note**: This is entirely separate from the existing `email_notifications` table (Section 8.3), which handles only billing invoice status changes via file-sink. The new `notifications` table serves in-app display only.
+
+**Affected roles**: All six roles (Admin, Doctor, Patient, Staff, Lab, BillingSpecialist).
+
+#### User Stories
+
+- NOTIF-1: As any authenticated user, I can see a bell icon in the top navigation bar with a badge showing the count of unread notifications. If there are no unread notifications, the badge is hidden (not shown as "0").
+- NOTIF-2: As any authenticated user, I can click the bell icon to open a notification panel showing my most recent notifications (most recent first), with unread items visually distinguished (e.g., bold or highlighted background).
+- NOTIF-3: As any authenticated user, I can click an individual notification to mark it as read. If the notification is related to a specific entity (appointment, invoice, lab result), clicking it also navigates to the relevant page.
+- NOTIF-4: As any authenticated user, I can mark all notifications as read in a single action.
+- NOTIF-5: As any authenticated user, I can view a full notifications list page (not just the dropdown panel) with pagination.
+
+#### Functional Requirements — Event Triggers
+
+The following events must create notification rows server-side at the time the triggering action occurs. The "Recipient(s)" column defines which user account(s) receive the notification.
+
+| Event type (stored in `notifications.event_type`) | Triggering action | Recipient(s) |
+|---|---|---|
+| `appointment_confirmed` | Appointment is created (any booking method) | Patient (owner), Doctor (assigned) |
+| `appointment_reminder` | See NOTIFFR-3 below — deferred trigger | Patient (owner), Doctor (assigned) |
+| `appointment_cancelled` | Appointment status set to Cancelled | Patient (owner), Doctor (assigned) |
+| `appointment_noshow` | Appointment status set to NoShow | Patient (owner) |
+| `lab_result_ready` | Lab result is marked finalized (is_finalized = 1) | Doctor (ordering), Patient (owner) |
+| `invoice_created` | New invoice is created | Patient (owner) |
+| `contact_form_received` | Public contact form submitted | All active Admin users, all active Staff users |
+| `account_created` | New user account is created by Admin or Staff | The newly created user |
+| `account_deactivated` | User account is deactivated | The deactivated user |
+| `lab_order_assigned` | Lab order is created (enters the queue) | All active Lab users |
+| `referral_received` | Doctor creates a referral (REQ-05) | Receiving doctor (if specified) or all doctors in receiving department |
+| `referral_status_changed` | Referral is accepted or declined (REQ-05) | Referring doctor, Patient |
+| `waitlist_slot_available` | Cancellation frees a slot (REQ-09) | First patient on waitlist (FIFO) |
+| `discharge_summary_ready` | Doctor creates discharge summary (REQ-10) | Patient |
+| `follow_up_booked` | Follow-up appointment booked from discharge panel (REQ-10) | Patient, Doctor |
+| `survey_available` | Survey trigger record matures (REQ-11) | Patient |
+
+- NOTIFFR-1: Each notification row stores: recipient_user_id, event_type, title (short text, max 120 chars), body (detail text, max 500 chars), related_entity_type (nullable text, e.g. 'appointment', 'invoice', 'lab_result', 'referral'), related_entity_id (nullable integer), is_read (boolean, default false), created_at.
+- NOTIFFR-2: Notifications are per-user — a notification for "Doctor and Patient" creates two separate rows, one per recipient.
+- NOTIFFR-3: `appointment_reminder` notifications cannot be generated synchronously since they must fire 24 hours before the appointment. Since the current stack has no background job scheduler, this implementation is deferred: a `notification_schedules` table records upcoming reminder triggers (appointment_id, trigger_at timestamp, is_fired boolean). The backend checks for unfired, matured triggers on each authenticated request by the recipient user and creates the notification row at that point. This is a poll-on-login pattern, not a true background job. Sagar must confirm this approach is architecturally acceptable before design is locked (see Section 9.18, Open Item OI-2).
+- NOTIFFR-4: The notification panel in the UI shows at most 20 items. The full-page notification list is paginated (page_size=20 default).
+- NOTIFFR-5: Unread badge count is returned by a dedicated lightweight endpoint (`GET /notifications/unread-count`) that returns `{ "unread_count": N }`. This endpoint is called on every authenticated page load to keep the badge current without polling.
+- NOTIFFR-6: `GET /notifications` returns paginated notifications for the authenticated user, filtered to their own `recipient_user_id`. A user cannot request another user's notifications.
+- NOTIFFR-7: `PATCH /notifications/{id}/read` marks a single notification as read (only if it belongs to the caller — 403 otherwise). `POST /notifications/mark-all-read` marks all of the caller's unread notifications as read.
+
+#### Non-Functional Requirements
+
+- NOTIFNFR-1: The unread count endpoint must respond within 200ms. It queries only `WHERE recipient_user_id = ? AND is_read = 0` with an index on (recipient_user_id, is_read).
+- NOTIFNFR-2: Notification creation is synchronous (same request as the triggering action) and must not cause perceptible latency — notification inserts are a batch INSERT at the end of the triggering transaction, not nested queries.
+- NOTIFNFR-3: No email or SMS is sent. In-app persistence only.
+
+#### Acceptance Criteria
+
+- AC-NOTIF-1: Given a Patient books an appointment, when the booking POST returns 200, then a notification row with event_type='appointment_confirmed' exists for the patient's user_id AND a separate row exists for the assigned doctor's user_id.
+- AC-NOTIF-2: Given a Doctor has 3 unread notifications, when they call `GET /notifications/unread-count`, then the response is `{ "unread_count": 3 }`. After calling `POST /notifications/mark-all-read`, a subsequent call returns `{ "unread_count": 0 }`.
+- AC-NOTIF-3: Given Patient A has 5 notifications, when Patient B (different user) calls `GET /notifications`, then Patient A's notifications are not in the response.
+- AC-NOTIF-4: Given a Lab result is marked finalized, then notification rows are created for both the ordering doctor and the patient — not for any other user.
+- AC-NOTIF-5: Given a public contact form is submitted, then notification rows are created for every active Admin user and every active Staff user currently in the database. No notification is created for Doctor, Patient, Lab, or BillingSpecialist users.
+
+#### Dependencies
+
+- REQ-05, REQ-09, REQ-10, REQ-11 all depend on this notification infrastructure being implemented first.
+- Extends VI-SHELL-4 (the `Bell` placeholder icon already in the AppShell topbar must now be wired to NOTIFFR-5).
+
+#### Priority: High
+
+---
+
+### 9.3 REQ-03 — Patient Pre-Visit Intake Form (High)
+
+**Description**: A structured form linked 1:1 to an appointment. The patient fills it out before their visit. The doctor sees it inline in the appointment detail view. Once the appointment reaches Completed status, the form becomes permanently read-only for all roles.
+
+**Affected roles**: Patient (fill/edit before appointment is Completed), Doctor (read-only at all times), Staff (read-only), Admin (read-only).
+
+#### User Stories
+
+- INTAKE-1: As a Patient, after booking an appointment, I can access a "Pre-Visit Form" for that appointment from my appointment detail view and fill in my chief complaint, symptom duration, current allergies, current medications, pain scale (1–10), and any additional notes.
+- INTAKE-2: As a Patient, I can save the form as a draft (partial fill) and return to edit it later, as long as the appointment has not yet reached Completed status.
+- INTAKE-3: As a Patient, once an appointment is marked Completed, the intake form for that appointment is permanently read-only and I can still view (but not edit) it.
+- INTAKE-4: As a Doctor, I can see the patient's completed intake form within the appointment detail view for any of my appointments. If the patient has not yet submitted the form, I see a "Not yet submitted" state.
+- INTAKE-5: As a Staff member, I can view (read-only) the intake form for any appointment, to assist with coordination.
+
+#### Functional Requirements
+
+- INTAKEFR-1: The intake form is linked 1:1 to an appointment (one form per appointment, unique constraint on appointment_id). It is created (as an empty/draft record) when the appointment is created.
+- INTAKEFR-2: Form fields: `chief_complaint` (TEXT, required to mark as submitted), `symptom_duration` (TEXT, required), `allergies` (TEXT, nullable — "None" if patient reports none), `current_medications` (TEXT, nullable — "None" if no current meds), `pain_scale` (INTEGER, 1–10, nullable — only required for submissions, not drafts), `additional_notes` (TEXT, nullable), `submitted_at` (TEXT, ISO 8601 — null if draft, set on first full submission).
+- INTAKEFR-3: A "submitted" form is one where `submitted_at` is not null. A patient can re-edit a submitted form and re-submit it (updating `submitted_at`) as long as the appointment is not yet Completed.
+- INTAKEFR-4: When an appointment is transitioned to Completed status, the associated intake form becomes read-only system-wide. Any subsequent PATCH/PUT to the intake form endpoint for a Completed appointment returns 403 Forbidden.
+- INTAKEFR-5: The patient can only access the intake form for appointments where they are the patient. The doctor can only access it for appointments assigned to them. Staff can access all.
+- INTAKEFR-6: `pain_scale` must be validated server-side as an integer between 1 and 10 inclusive. Values outside this range return 400 Bad Request.
+
+#### Non-Functional Requirements
+
+- INTAKENF-1: Intake form data is included in the Patient Medical Record PDF export (REQ-08) for the relevant appointment.
+- INTAKENF-2: The intake form is not visible to Lab or BillingSpecialist roles.
+
+#### Acceptance Criteria
+
+- AC-INTAKE-1: Given a Patient has a Scheduled appointment, when they submit the intake form with all required fields and `pain_scale=7`, then `submitted_at` is set to a non-null timestamp and the form is retrievable by the Doctor in the appointment detail view.
+- AC-INTAKE-2: Given a Patient's appointment is marked Completed, when the Patient calls PATCH on that appointment's intake form, then the response is 403 Forbidden and the form data is unchanged.
+- AC-INTAKE-3: Given a Patient submits `pain_scale=11`, then the response is 400 Bad Request with a validation error identifying the `pain_scale` field.
+- AC-INTAKE-4: Given an appointment exists with patient_id=A, when a different Patient B calls GET on that appointment's intake form, then the response is 403 Forbidden.
+
+#### Priority: High
+
+---
+
+### 9.4 REQ-04 — Vitals Trend Visualization (Medium)
+
+**Description**: Time-series charts of key vitals (blood pressure systolic/diastolic, weight, pulse, temperature) plotted over appointment dates, visible to Doctors and Staff on the patient profile. This requirement also resolves a pre-existing schema gap: STF-4 (recording vital signs) was in scope since Section 2.4 but had no backing table in db/schema.sql. The vitals table defined here serves both STF-4 and the new visualization.
+
+**Affected roles**: Staff (record vitals — existing STF-4), Doctor (view trend charts), Admin (view as part of patient record access).
+
+#### User Stories
+
+- VIT-1: As a Staff member, before a doctor's consultation, I can record vital signs for a patient appointment: systolic BP (mmHg), diastolic BP (mmHg), weight (kg), pulse (bpm), temperature (°C), and optionally height (cm). At least one vital field must be non-null to save a record.
+- VIT-2: As a Doctor, I can view a vitals trend section on a patient's profile showing time-series charts for: (a) BP (systolic and diastolic as two lines on one chart), (b) weight, (c) pulse, (d) temperature. The x-axis is appointment date, the y-axis is the measurement value.
+- VIT-3: As a Doctor, if a patient has fewer than 2 vitals records, the trend charts are replaced with an informational message ("Not enough data to display trend — at least 2 readings required").
+- VIT-4: As a Doctor or Staff member, I can view individual vitals readings in a tabular list alongside the charts.
+- VIT-5: Vitals data is read-only for Doctors. Only Staff (and Admin) can create vitals records.
+
+#### Functional Requirements
+
+- VITFR-1: Vitals are stored with: `patient_id` (FK), `appointment_id` (FK, nullable — a vitals record may be taken without being linked to a specific appointment, e.g. a standalone check), `recorded_by_user_id` (FK → users), `systolic_bp` (INTEGER, nullable), `diastolic_bp` (INTEGER, nullable), `weight_kg` (REAL, nullable), `pulse_bpm` (INTEGER, nullable), `temperature_celsius` (REAL, nullable), `height_cm` (REAL, nullable), `recorded_at` (TEXT, ISO 8601).
+- VITFR-2: If both `systolic_bp` and `diastolic_bp` are provided, both must be integers ≥ 40 and ≤ 300. If only one is provided, the record is rejected with 400 Bad Request — both or neither.
+- VITFR-3: Weight must be > 0 if provided. Temperature must be between 30.0 and 45.0 °C if provided. Pulse must be between 20 and 300 bpm if provided. These ranges are validated server-side.
+- VITFR-4: The trend data endpoint (`GET /patients/{patient_id}/vitals`) returns all vitals records for the patient in ascending `recorded_at` order, suitable for rendering a chart. The response includes the raw records and no server-side aggregation.
+- VITFR-5: Charts must not rely on color as the only means of distinguishing data series (accessibility). Each data point on BP chart must also use distinct line styles or symbols (e.g., dashed vs. solid) to distinguish systolic from diastolic.
+- VITFR-6: Doctor access to vitals is subject to the existing AUTHZ-2 rule: a Doctor may only view vitals for patients with whom they have an appointment relationship.
+
+#### Non-Functional Requirements
+
+- VITNFR-1: The frontend chart library must be chosen by Sagar in Phase 4 and must be a standard, well-maintained library compatible with React 19 (e.g., Recharts, Chart.js via react-chartjs-2, Nivo). No D3 direct DOM manipulation.
+- VITNFR-2: Vitals records are included in the Patient Medical Record PDF export (REQ-08).
+
+#### Acceptance Criteria
+
+- AC-VIT-1: Given a Staff member records systolic_bp=120, diastolic_bp=80, weight_kg=70.5, pulse_bpm=72, temperature_celsius=36.8 for Patient P linked to Appointment A, then a `vitals` row is created with all five fields set and `recorded_by_user_id` = Staff user's id.
+- AC-VIT-2: Given `systolic_bp=120` is submitted without `diastolic_bp`, then the response is 400 Bad Request.
+- AC-VIT-3: Given a patient has only 1 vitals record, when a Doctor views the trend section, then the chart is not rendered and the "not enough data" message is displayed.
+- AC-VIT-4: Given Doctor X has no appointment with Patient Z, when Doctor X calls `GET /patients/{Z_patient_id}/vitals`, then the response is 403 Forbidden.
+
+#### Priority: Medium
+
+---
+
+### 9.5 REQ-05 — Inter-Department Referral Management (Medium)
+
+**Description**: A referring doctor creates a referral to another department (with optional specific receiving doctor), including reason and urgency level. The referral flows through a defined status lifecycle. The receiving doctor accepts or declines. On acceptance, the system facilitates appointment booking for the patient. Patients can see their referral status. Admin has full read access.
+
+**Affected roles**: Doctor (create referrals; accept/decline received referrals), Patient (read own referral statuses), Admin (read all).
+
+#### User Stories
+
+- REF-1: As a Doctor, I can create a referral for one of my patients by specifying: receiving department (required), receiving doctor within that department (optional), clinical reason (required, free text), and urgency level (Routine or Urgent).
+- REF-2: As a Doctor who has received a referral (either assigned directly or as any doctor in the receiving department), I can view pending referrals assigned to me or my department.
+- REF-3: As a Doctor, I can accept a referral with an optional acceptance note, or decline it with a required decline reason.
+- REF-4: As a Doctor, after accepting a referral, I can book an appointment for the referred patient from the referral detail page — the appointment booking form is pre-populated with: patient, doctor (me, as accepting doctor), and reason derived from the referral. Booking this appointment transitions the referral status to 'AppointmentBooked'.
+- REF-5: As a Patient, I can view a list of referrals made for me, showing referring doctor, receiving department/doctor, urgency, current status, and (once available) the receiving doctor's note.
+- REF-6: As an Admin, I can view all referrals across all patients, filterable by status, department, and date range.
+- REF-7: A referral can be marked Completed by the receiving doctor once the referred consultation or appointment has concluded.
+
+#### Functional Requirements
+
+- REFFR-1: Referral status lifecycle: `Pending` (on creation) → `Accepted` (receiving doctor accepts) → `AppointmentBooked` (appointment created for the referral) → `Completed` (receiving doctor marks done). From `Pending`, the receiving doctor can also transition to `Declined`. No other status transitions are permitted.
+- REFFR-2: If no specific receiving doctor is specified, the referral is visible to all active doctors in the receiving department. The first doctor to accept it claims it (optimistic locking: the first PATCH to accept sets the `receiving_doctor_id` and status atomically).
+- REFFR-3: On acceptance, the system notifies the patient (via REQ-02 notification, event_type='referral_status_changed') with the accepting doctor's name and department.
+- REFFR-4: On decline, the system notifies the patient and the referring doctor (event_type='referral_status_changed'). The referral returns to `Pending` if declined — it is not permanently closed, allowing another doctor in the department to accept it. This differs from "Declined by a specific doctor" — see Section 9.18 Open Item OI-5 for clarification needed from Krishna.
+- REFFR-5: The referring doctor can only create referrals for patients with whom they have an appointment relationship (AUTHZ-2 applies).
+- REFFR-6: A Patient may not cancel or decline a referral. Only the receiving doctor can decline.
+- REFFR-7: Urgency is stored as `Routine` or `Urgent`. Urgent referrals appear at the top of the receiving department's referral queue regardless of creation time.
+
+#### Non-Functional Requirements
+
+- REFNFR-1: Referral data is not included in the Patient Medical Record PDF export (REQ-08) in this build. (Out of scope to avoid complexity — may be added in a future batch.)
+- REFNFR-2: Admin read access to all referrals does not include clinical reason text — Admin sees department, doctor names, urgency, status, and dates only. This preserves clinical information access controls per ADM-10.
+
+Actually, on reflection, the clinical reason is created by a Doctor and read by the receiving Doctor — Admin seeing it or not should be consistent with ADM-10. Flagging as Open Item OI-6 in Section 9.18.
+
+#### Acceptance Criteria
+
+- AC-REF-1: Given Doctor A (Cardiology) creates a referral for Patient P to Neurology, when the referral is saved, then a `referrals` row exists with status='Pending', referring_doctor_id=A, receiving_department_id=Neurology, patient_id=P, and a notification with event_type='referral_received' is created for all active Neurology doctors.
+- AC-REF-2: Given a Neurology doctor B accepts the referral, when the PATCH is processed, then the referral status is 'Accepted', receiving_doctor_id=B, and notifications with event_type='referral_status_changed' are created for the Patient P and Doctor A.
+- AC-REF-3: Given Doctor B accepts the referral and then books an appointment via the referral detail page, when the appointment is created, then the referral status transitions to 'AppointmentBooked' and the new appointment_id is stored on the referral row.
+- AC-REF-4: Given Doctor C (also in Neurology) attempts to accept the same referral that Doctor B just accepted, then Doctor C's acceptance request returns 409 Conflict (or the referral is no longer in Pending status — the specific error is architecture's decision).
+- AC-REF-5: Given Patient P calls `GET /patients/me/referrals`, then only referrals where patient_id = P's patient_id are returned.
+
+#### Dependencies
+
+- Notification infrastructure (REQ-02) is required before this can be fully implemented.
+- Follow-up appointment booking uses REQ-01 availability query when scheduling the referred appointment.
+
+#### Priority: Medium
+
+---
+
+### 9.6 REQ-06 — Advanced Analytics & Reporting Dashboard — Admin Only (High)
+
+**Description**: A server-side-aggregated analytics dashboard accessible only to Admin. Shows appointment volume trends, no-show rates, revenue summary, department rankings, and patient acquisition trends over a configurable date range. CSV export available for each metric area. No other role has access to this dashboard.
+
+**Affected roles**: Admin only.
+
+#### User Stories
+
+- ANLY-1: As an Admin, I can view a dashboard page showing aggregate analytics for the hospital, with a date range picker allowing me to select custom start/end dates or use presets: Last 7 days, Last 30 days, Last 3 months, Last 12 months, Year to date, All time.
+- ANLY-2: As an Admin, I can view an appointment volume trend chart: total appointments per month (grouped by `scheduled_at` month) within the selected date range, broken down by status (Scheduled, Completed, Cancelled, NoShow) as stacked or grouped bars.
+- ANLY-3: As an Admin, I can view a no-show rate trend: percentage of appointments with status='NoShow' out of total appointments (excluding Cancelled) per month.
+- ANLY-4: As an Admin, I can view a revenue summary chart: per month — (a) total invoiced amount (sum of all invoice `total_amount_cents` created that month) and (b) total collected amount (sum of `total_amount_cents` where status='Paid' and payment/update occurred that month). Both lines on the same chart.
+- ANLY-5: As an Admin, I can view a department volume ranking: a ranked bar chart or table showing each department's total appointment count within the date range, sorted descending.
+- ANLY-6: As an Admin, I can view a patient acquisition trend: new patient registrations (new `patients` rows, by `users.created_at`) per month within the date range.
+- ANLY-7: As an Admin, I can export the data for any single metric as a CSV file. The CSV includes the raw data rows (not a pre-rendered chart) suitable for import into Excel or Google Sheets.
+- ANLY-8: No role other than Admin can access any analytics endpoint. All analytics endpoints return 403 Forbidden to any other role.
+
+#### Functional Requirements
+
+- ANLYFR-1: All aggregation is performed server-side via SQL aggregate queries. The frontend receives pre-aggregated data (e.g., `[{ month: "2026-05", total: 142, completed: 98, cancelled: 30, noshow: 14 }, ...]`) and renders it as charts. The frontend must not perform SUM, AVG, COUNT, or GROUP operations on raw data arrays.
+- ANLYFR-2: The analytics API exposes separate endpoints per metric group to allow independent loading and export:
+  - `GET /admin/analytics/appointments?start=YYYY-MM-DD&end=YYYY-MM-DD`
+  - `GET /admin/analytics/revenue?start=YYYY-MM-DD&end=YYYY-MM-DD`
+  - `GET /admin/analytics/departments?start=YYYY-MM-DD&end=YYYY-MM-DD`
+  - `GET /admin/analytics/patient-acquisition?start=YYYY-MM-DD&end=YYYY-MM-DD`
+- ANLYFR-3: CSV export is triggered by adding `?format=csv` to any analytics endpoint. The backend returns a `Content-Type: text/csv` response with `Content-Disposition: attachment; filename="...csv"`. No separate export endpoint is needed.
+- ANLYFR-4: Date range validation: `start` must be before `end`. If not, return 400 Bad Request. If `start` or `end` is missing, the default range is last 12 months from today.
+- ANLYFR-5: Revenue chart uses `invoices.created_at` for the "invoiced" series and (for the "collected" series) `invoices.created_at` where `status='Paid'` — both series grouped by the month of `created_at`. This is an approximation (it attributes payment to creation month, not the actual date status changed to Paid). This is a known simplification; a precise approach would require storing `paid_at` — this is an open item for Sagar (OI-7 in Section 9.18).
+- ANLYFR-6: The chart type (bar, line) and library are Sagar's decision in Phase 3/4, subject to VITNFR-1's constraint (React 19-compatible, standard library).
+
+#### Acceptance Criteria
+
+- AC-ANLY-1: Given an Admin calls `GET /admin/analytics/appointments?start=2026-01-01&end=2026-06-30`, then the response contains an array of monthly objects covering Jan–Jun 2026, each with total/completed/cancelled/noshow counts derived from `appointments.scheduled_at`. No calculation is done client-side.
+- AC-ANLY-2: Given a non-Admin user (Doctor, Patient, Staff, Lab, BillingSpecialist) calls any analytics endpoint, then the response is 403 Forbidden.
+- AC-ANLY-3: Given an Admin calls `GET /admin/analytics/departments?start=2026-01-01&end=2026-12-31&format=csv`, then the response has Content-Type: text/csv and the body is a valid CSV with department name and appointment count columns.
+- AC-ANLY-4: Given `start=2026-06-01&end=2026-01-01` (end before start), then the response is 400 Bad Request.
+
+#### Priority: High
+
+---
+
+### 9.7 REQ-07 — Public Symptom / Condition Search (High)
+
+**Description**: A search bar available on the public site (no login required) that matches user queries against department names/descriptions, doctor specialty/bio, and admin-curated symptom tags per department. Results are ranked (departments first, then individual doctors). Empty-result fallback is shown. Admin manages symptom tags from the admin portal.
+
+**Affected roles**: Public (no auth — visitors), Admin (manage symptom tags).
+
+#### User Stories
+
+- SRCH-1: As a visitor on the public site, I can enter a symptom, condition, or keyword into a search bar and see ranked results showing which departments and doctors at Green Valley Hospital are relevant to my query.
+- SRCH-2: As a visitor, search results show departments first (with their name, description snippet, and icon), followed by doctors (with name, specialty, department). Each result is a clickable link to the department page or doctor profile page.
+- SRCH-3: As a visitor, if no results are found, I see a clear "No results found for '{query}'" message with a suggestion to contact the hospital or browse departments.
+- SRCH-4: As an Admin, I can manage symptom tags for each department in the admin portal: add, edit, or remove free-text tags (e.g., "chest pain", "shortness of breath", "heart palpitations" for Cardiology). Tags are used to improve search matching beyond the department's name and description.
+- SRCH-5: As an Admin, I can view which departments have symptom tags and how many tags each has.
+
+#### Functional Requirements
+
+- SRCHFR-1: The public search endpoint (`GET /public/search?q={query}`) performs case-insensitive substring matching against: (a) `departments.name`, (b) `departments.description`, (c) `department_symptom_tags.tag_text` for all tags belonging to each department, (d) `doctors.specialty`, (e) `doctors.bio`. Only active departments and active doctor accounts are searched.
+- SRCHFR-2: Result ranking: departments appear before doctors in the response. Within departments, those matching on `name` rank above those matching on `description` or `tags`. Within doctors, those matching on `specialty` rank above those matching on `bio`. The ranking is determined server-side; the frontend renders in the order received.
+- SRCHFR-3: The response shape separates departments and doctors: `{ "departments": [...], "doctors": [...], "query": "chest pain", "total": 5 }`.
+- SRCHFR-4: Minimum query length: 2 characters. Queries shorter than 2 characters return 400 Bad Request with a validation message. Maximum query length: 200 characters. Queries longer than 200 characters are truncated server-side (not rejected).
+- SRCHFR-5: Symptom tags are stored per department in a `department_symptom_tags` table. Each tag is a free-text string (max 100 chars). A department may have 0–50 tags (enforced server-side on admin CRUD). Duplicate tag text per department is rejected (case-insensitive unique constraint per department).
+- SRCHFR-6: The admin symptom tag CRUD endpoints are: `GET /admin/departments/{id}/tags`, `POST /admin/departments/{id}/tags` (body: `{ "tag_text": "..." }`), `DELETE /admin/departments/{id}/tags/{tag_id}`, `PUT /admin/departments/{id}/tags/{tag_id}` (body: `{ "tag_text": "..." }`).
+- SRCHFR-7: The public search bar is added to the public site navigation or home page. Its placement and visual design are Sagar's decision in Phase 3. It must be accessible without any page navigation (i.e., not requiring the visitor to go to a dedicated /search URL first, though a dedicated `/search` results page is acceptable after submission).
+
+#### Acceptance Criteria
+
+- AC-SRCH-1: Given Cardiology department has symptom tags ["chest pain", "shortness of breath"] and the query is "chest", then the Cardiology department appears in the response `departments` array.
+- AC-SRCH-2: Given the query is "neuro", then the Neurology department appears in results (matched on department name). If a doctor has "neurology" in their bio, that doctor also appears in the `doctors` array. Departments appear before doctors in the combined results page.
+- AC-SRCH-3: Given the query is "xyz123noresult", then the response is `{ "departments": [], "doctors": [], "query": "xyz123noresult", "total": 0 }` and the UI renders the fallback message.
+- AC-SRCH-4: Given the query is "a" (1 character), then the response is 400 Bad Request.
+- AC-SRCH-5: Given an Admin adds the tag "hair loss" to Dermatology, when a visitor searches for "hair", then Dermatology appears in results.
+
+#### Priority: High
+
+---
+
+### 9.8 REQ-08 — Patient Medical Record Export (PDF) (Medium)
+
+**Description**: On-demand server-generated PDF of a patient's full medical record, accessible only to the patient themselves. The PDF is not stored on the server. An optional date range filter narrows which visits are included. The PDF is watermarked. This requirement moves a previously out-of-scope item into scope (see Section 9.13).
+
+**Affected roles**: Patient (own records only). No other role may trigger this export.
+
+#### User Stories
+
+- PDF-1: As a Patient, from my records page, I can request a PDF export of my medical records. The PDF downloads immediately (no email, no stored file).
+- PDF-2: As a Patient, before generating the PDF, I can optionally filter the included visits by date range (start date, end date). If no filter is applied, all records are included.
+- PDF-3: As a Patient, the generated PDF contains: (a) cover page, (b) patient demographics, (c) visit notes and diagnoses for each included appointment (ordered by date), (d) prescriptions, (e) completed lab results, (f) vitals recorded at each appointment. Each section is clearly headed.
+- PDF-4: As a Patient, the PDF is watermarked on every page with: hospital name, patient full name, patient ID, and export timestamp (UTC).
+
+#### Functional Requirements
+
+- PDFFR-1: The PDF is generated server-side on each request. No file is written to disk. The endpoint streams the PDF bytes directly as the response body with `Content-Type: application/pdf` and `Content-Disposition: attachment; filename="GVH_MedicalRecord_{patient_id}_{YYYYMMDD}.pdf"`.
+- PDFFR-2: Endpoint: `GET /patients/me/export-pdf?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` (date params are optional). Auth: Patient only. Any other role calling this endpoint receives 403 Forbidden.
+- PDFFR-3: The date range filter applies to `appointments.scheduled_at`. Only appointments within the range (inclusive) are included, along with their associated visit notes, prescriptions, and lab results.
+- PDFFR-4: The cover page must include: hospital name and logo (text-based, no external image), export date and time (UTC), patient full name, patient date of birth, patient ID, and date range applied (or "All records" if no filter).
+- PDFFR-5: Watermark is rendered on every page as diagonal text at low opacity (e.g., 15% opacity, 45° angle), containing: "Green Valley Hospital | {patient_full_name} | ID:{patient_id} | Exported: {YYYY-MM-DD HH:MM UTC}". The watermark must not obscure the readable content.
+- PDFFR-6: Lab result file attachments (images, scanned documents stored at `lab_results.file_attachment_path`) are NOT included in the PDF export (out of scope for this build — binary attachment embedding is deferred). The PDF includes only the text/values from `lab_results.result_data`.
+- PDFFR-7: The PDF library choice is Sagar's decision in Phase 4 (see Section 9.18 Open Item OI-3). WeasyPrint and ReportLab are the two most likely candidates given the Python/FastAPI stack. The choice must be documented in `docs/architecture.md` before implementation begins.
+- PDFFR-8: Generation must complete within 10 seconds for a patient with up to 100 appointment records. Requests exceeding 30 seconds should be aborted with 504 Gateway Timeout (this sets an expectation for the library/template approach chosen).
+
+#### Acceptance Criteria
+
+- AC-PDF-1: Given Patient P is authenticated and calls `GET /patients/me/export-pdf`, then the response has Content-Type: application/pdf, a non-empty body, and Content-Disposition: attachment with a filename containing the patient_id.
+- AC-PDF-2: Given a non-Patient role (Doctor, Admin) calls `GET /patients/me/export-pdf`, then the response is 403 Forbidden and no PDF is generated.
+- AC-PDF-3: Given the filter `?start_date=2026-01-01&end_date=2026-03-31` is applied and Patient P has appointments in Jan, Mar, and Jun 2026, then the PDF contains sections for Jan and Mar appointments only — the Jun appointment is absent.
+- AC-PDF-4: Given the generated PDF is opened, then every page contains the watermark text including the patient's name, patient ID, and a date/time string. The watermark does not cover the primary text to the point of making it illegible.
+
+#### Priority: Medium
+
+---
+
+### 9.9 REQ-09 — Appointment Waitlist System (Medium)
+
+**Description**: When a patient attempts to book a slot with a doctor that has no available slots, they can join a FIFO waitlist for that doctor. On cancellation of an existing appointment, the first patient on the waitlist is notified via REQ-02. A configurable confirmation window (default 4 hours) gives the waitlisted patient time to confirm the slot. Non-response moves the patient to the back of the list (not removed). Staff can manage the waitlist. Admin sees fill-time statistics. This requirement removes "Waitlist management for fully booked doctors" from Section 4's Out of Scope list.
+
+**Affected roles**: Patient (join waitlist), Staff (manage waitlist), Admin (view stats).
+
+**Hard dependency**: REQ-01 (Availability & Slot Management) and REQ-02 (Notification Center) must be implemented before this requirement.
+
+#### User Stories
+
+- WL-1: As a Patient, when I select a doctor and date and no slots are available, I see a "Join Waitlist" option. Clicking it adds me to the doctor's waitlist with my preferred date noted (optional — I may be open to any date).
+- WL-2: As a Patient, I can see my active waitlist entries in my appointments section, showing doctor name, department, my position in the queue, and the date I joined.
+- WL-3: As a Patient, I can remove myself from a waitlist at any time before a slot is offered to me.
+- WL-4: As a Patient, when a slot becomes available and I am first in the queue, I receive a notification (event_type='waitlist_slot_available') with a link to confirm the slot. I have 4 hours (configurable by Admin) to confirm. If I do not confirm within that window, I am moved to the back of the list and the next patient is notified.
+- WL-5: As a Staff member, I can view the full waitlist for any doctor, see each patient's position and join date, and manually remove a patient from the waitlist with a recorded reason.
+- WL-6: As an Admin, I can configure the global confirmation window duration (in hours, default 4, min 1, max 72) for all waitlists system-wide. Per-doctor configuration is out of scope for this build.
+- WL-7: As an Admin, I can view waitlist fill-time statistics: average time from slot-available notification to confirmed booking, per doctor and across the hospital, for a selected date range.
+
+#### Functional Requirements
+
+- WLFR-1: The waitlist is per-doctor (not per-doctor-per-date). When a patient joins, they are placed at the end of that doctor's waitlist. FIFO ordering is maintained by `created_at` timestamp.
+- WLFR-2: Waitlist entry statuses: `Waiting` (active in queue), `Notified` (slot offered, awaiting confirmation), `Confirmed` (patient accepted, appointment being created), `Expired` (confirmation window elapsed — patient moved to back of list, status of this entry is closed but patient remains on list as a new Waiting entry), `Removed` (patient or staff removed the entry).
+- WLFR-3: "Moved to back" is implemented by creating a NEW `waitlist_entries` row with status='Waiting' and current `created_at`, while the old entry is set to status='Expired'. The patient's effective position is now last. There is no hard limit on how many times this can happen in this build.
+- WLFR-4: The trigger for offering a slot is any appointment cancellation (status → Cancelled). On cancellation, the backend checks if the cancelled appointment's doctor has any `Waiting` waitlist entries. If yes, the first one (by `created_at`) is set to 'Notified' and a `waitlist_slot_available` notification is created (REQ-02). The freed slot is held for the confirmation window; it does not appear in the public slot query until the window expires without confirmation or the patient declines.
+- WLFR-5: Slot confirmation is via `POST /waitlist/{entry_id}/confirm` (Patient only, own entry). This creates an appointment, sets the entry status to 'Confirmed', and removes the slot from the hold.
+- WLFR-6: The global confirmation window is stored as a system configuration value (a `system_config` table with key='waitlist_confirmation_hours', value=TEXT). Admin reads/writes it via `GET /admin/config/waitlist` and `PUT /admin/config/waitlist` (body: `{ "confirmation_hours": 4 }`).
+- WLFR-7: A patient may only have one active ('Waiting' or 'Notified') waitlist entry per doctor at a time. Attempting to join a doctor's waitlist twice returns 409 Conflict.
+
+#### Acceptance Criteria
+
+- AC-WL-1: Given Patient P joins Doctor D's waitlist and is the only entry, when Doctor D's only Scheduled appointment is cancelled, then within the same cancellation request: (a) a `waitlist_slot_available` notification is created for P, (b) P's waitlist entry status changes to 'Notified', (c) `notified_at` is set, (d) `confirmation_deadline` is set to `notified_at + 4 hours`.
+- AC-WL-2: Given Patient P is 'Notified' and does not confirm within the confirmation window, when the expiry is checked (on P's next login), then P's entry status becomes 'Expired', a new 'Waiting' entry is created for P at the back of the list, and the next patient in queue (if any) is notified.
+- AC-WL-3: Given Patient P is already on Doctor D's waitlist with status='Waiting', when P attempts to join Doctor D's waitlist again, then the response is 409 Conflict.
+- AC-WL-4: Given the Admin sets confirmation_hours to 2, when a slot becomes available next, then the notification includes a confirmation deadline 2 hours from notification time.
+
+#### Priority: Medium
+
+---
+
+### 9.10 REQ-10 — Discharge Summary & Follow-Up Scheduling (Medium)
+
+**Description**: When a doctor marks an appointment Completed, an optional discharge summary panel allows them to record key findings, patient instructions, activity restrictions, and medication reminders. Optionally, they can book a follow-up appointment directly from this panel (using REQ-01 slot availability). The patient receives a notification (via REQ-02) and can view the discharge summary from their appointments page. Follow-up appointments appear in both the doctor's schedule and the patient's upcoming appointments.
+
+**Affected roles**: Doctor (create discharge summary, book follow-up), Patient (read own discharge summaries).
+
+**Hard dependencies**: REQ-01 (slot availability for follow-up booking), REQ-02 (notification to patient on summary creation).
+
+#### User Stories
+
+- DS-1: As a Doctor, when I mark an appointment as Completed, I am presented with an optional discharge summary panel (not mandatory — I can skip it).
+- DS-2: As a Doctor, in the discharge summary panel, I can fill in: key findings (required if submitting the summary), patient instructions (nullable), activity restrictions (nullable), and medication reminders (nullable free text — distinct from the prescriptions workflow).
+- DS-3: As a Doctor, within the same discharge summary panel, I can optionally book a follow-up appointment for the patient by selecting a date and available slot (using the REQ-01 availability API for my own schedule). The follow-up is created as a Scheduled appointment.
+- DS-4: As a Patient, I receive a notification (event_type='discharge_summary_ready') when a discharge summary is created for my appointment. I can view the discharge summary from my appointment history page.
+- DS-5: As a Patient, if a follow-up appointment was booked, it appears immediately in my upcoming appointments list and I receive a separate notification (event_type='follow_up_booked').
+- DS-6: As a Doctor, the follow-up appointment booked from the discharge panel appears in my appointments list exactly as any other Scheduled appointment would.
+
+#### Functional Requirements
+
+- DSFR-1: Discharge summary is linked 1:1 to an appointment (unique on `appointment_id`). It can only be created for appointments with status='Completed'. Attempting to create a summary for a non-Completed appointment returns 400 Bad Request.
+- DSFR-2: Fields: `appointment_id` (FK, UNIQUE), `patient_id` (FK), `doctor_id` (FK), `key_findings` (TEXT, required), `patient_instructions` (TEXT, nullable), `activity_restrictions` (TEXT, nullable), `medication_reminders` (TEXT, nullable — free text, not linked to the prescriptions table), `follow_up_appointment_id` (FK → appointments, nullable), `created_at`.
+- DSFR-3: If `follow_up_appointment_id` is provided at summary creation time, the backend validates that the referenced appointment exists, has `doctor_id` matching the creating doctor, and has status='Scheduled'. If any condition fails, the summary creation request fails (400 Bad Request) — the doctor must book the follow-up first, then link it.
+- DSFR-4: Alternatively (and preferably for UX), the discharge summary creation endpoint accepts an optional `follow_up` block in the request body (`{ "doctor_id": ..., "scheduled_at": "..." }`) and creates the follow-up appointment atomically in the same transaction. If slot validation fails (slot taken), the whole request fails. Sagar should decide between DSFR-3 and this atomic approach in Phase 4 (Open Item OI-8 in Section 9.18).
+- DSFR-5: Patient read access: `GET /patients/me/discharge-summaries` and `GET /patients/me/appointments/{id}/discharge-summary`. Only the owning patient's summaries.
+- DSFR-6: Doctor read access: `GET /doctor/appointments/{id}/discharge-summary` for appointments assigned to them.
+- DSFR-7: Discharge summaries are included in the Patient Medical Record PDF export (REQ-08).
+- DSFR-8: A discharge summary cannot be deleted after creation. It can be amended only once and must store both the original and amended text (amendment is out of scope for this build — if needed, raise a new requirement). In this build, discharge summaries are immutable after creation.
+
+#### Acceptance Criteria
+
+- AC-DS-1: Given Appointment A is Completed, when Doctor D creates a discharge summary with key_findings="Mild hypertension noted", then (a) a `discharge_summaries` row exists, (b) a notification with event_type='discharge_summary_ready' is created for the patient, (c) the patient can retrieve the summary via GET /patients/me/appointments/{A.id}/discharge-summary.
+- AC-DS-2: Given Appointment A has status='Scheduled' (not Completed), when Doctor D attempts to create a discharge summary for it, then the response is 400 Bad Request.
+- AC-DS-3: Given a discharge summary is created with a follow-up appointment slot, when the response is returned, then both the discharge summary row and the follow-up appointment row exist, the follow-up appears in the patient's upcoming appointments and in the doctor's schedule.
+- AC-DS-4: Given Patient P calls `GET /patients/me/appointments/{A.id}/discharge-summary` for an appointment that belongs to Patient Q, then the response is 403 Forbidden.
+
+#### Priority: Medium
+
+---
+
+### 9.11 REQ-11 — Patient Satisfaction Survey & Doctor Ratings (Medium)
+
+**Description**: After an appointment is marked Completed (never Cancelled or NoShow), the system creates a pending survey record. The patient receives an in-app notification after 24 hours. The survey expires after 7 days if not responded to. Submissions are immutable. Doctors see their own aggregate rating. Admin sees all with patient identity. Admin can remove comment text without affecting star ratings.
+
+**Affected roles**: Patient (submit survey), Doctor (view own aggregate + anonymized comments), Admin (view all, moderate comments).
+
+**Hard dependency**: REQ-02 (Notification Center, for the survey availability notification).
+
+#### User Stories
+
+- SURV-1: As a Patient, approximately 24 hours after a Completed appointment, I receive an in-app notification (event_type='survey_available') inviting me to rate my experience.
+- SURV-2: As a Patient, I can submit a rating with: doctor star rating (1–5 stars, required), overall experience star rating (1–5 stars, required), and an optional written comment (max 1,000 characters).
+- SURV-3: As a Patient, once I submit a survey, it is permanently immutable — I cannot edit or delete it.
+- SURV-4: As a Patient, I can only see whether I have submitted or not for each appointment — I cannot view the ratings I gave after submission (they are stored but not re-displayed to me, to prevent gaming or regret-editing).
+- SURV-5: As a Doctor, I can view my aggregate rating dashboard: average doctor star rating across all submitted surveys, total submission count, and anonymized comment text (no patient name visible). Comments are listed in reverse chronological order.
+- SURV-6: As an Admin, I can view all survey submissions with patient identity (name, patient ID) and the full comment text.
+- SURV-7: As an Admin, I can remove the comment text from a specific submission (setting it to null or a placeholder "[Removed by admin]") without removing the star rating row. The star ratings always remain in the aggregate.
+- SURV-8: A survey that has not been submitted 7 days after `trigger_after` is automatically expired and no longer accessible to the patient for submission.
+
+#### Functional Requirements
+
+- SURVFR-1: When an appointment is transitioned to status='Completed', a `satisfaction_surveys` row is created with: `appointment_id` (FK, UNIQUE), `patient_id`, `doctor_id`, `trigger_after` (TEXT, ISO 8601 = completed_at + 24 hours), `expires_at` (TEXT, ISO 8601 = trigger_after + 7 days), `submitted_at` (null), `doctor_star_rating` (null), `overall_star_rating` (null), `comment` (null), `is_comment_removed` (default false).
+- SURVFR-2: Since the stack has no background job scheduler, the survey notification is dispatched using the same poll-on-login pattern as appointment reminders (REQ-02, NOTIFFR-3): on each authenticated request by the patient, the backend checks for any `satisfaction_surveys` rows where `patient_id=me AND submitted_at IS NULL AND trigger_after <= NOW() AND expires_at > NOW() AND notification_sent = false`. For each such row, a notification (event_type='survey_available') is created and `notification_sent` is set to true. The `notification_sent` column must be added to the `satisfaction_surveys` table (BOOLEAN, default false).
+- SURVFR-3: Submission endpoint: `POST /patients/me/surveys/{survey_id}` (body: `{ "doctor_star_rating": 4, "overall_star_rating": 5, "comment": "..." }`). Validates: (a) survey belongs to calling patient, (b) `submitted_at` is null (not already submitted), (c) `expires_at > NOW()` (not expired), (d) both star ratings are integers 1–5. On success, sets `submitted_at = NOW()`.
+- SURVFR-4: Doctor aggregate endpoint: `GET /doctor/ratings` — returns: `{ "average_doctor_rating": 4.3, "total_reviews": 47, "comments": [ { "comment": "...", "submitted_at": "..." }, ... ] }`. Patient name is never included in doctor-facing response.
+- SURVFR-5: Admin view: `GET /admin/surveys` — paginated list of all submitted surveys with patient_id, patient_name (joined), doctor_id, doctor_name, ratings, comment, submitted_at. `GET /admin/surveys/{id}` — single record. `PATCH /admin/surveys/{id}/remove-comment` — sets comment to null and is_comment_removed to true. Is idempotent.
+- SURVFR-6: A survey may only be created once per appointment (UNIQUE constraint on appointment_id). Surveys are never created for Cancelled or NoShow appointments — only Completed.
+- SURVFR-7: If the appointment's doctor rating is requested by an unauthenticated visitor (public profile), only the aggregate average and total count are visible, not individual comments. This is Sagar's decision in Phase 3 whether to expose a public aggregate endpoint (Open Item OI-9 in Section 9.18).
+
+#### Acceptance Criteria
+
+- AC-SURV-1: Given Appointment A is marked Completed at 10:00 UTC on 2026-07-20, then a `satisfaction_surveys` row is created with `trigger_after = 2026-07-21T10:00:00` and `expires_at = 2026-07-28T10:00:00` and `submitted_at = null`.
+- AC-SURV-2: Given Patient P logs in on 2026-07-21T11:00:00 (after trigger_after), when the backend checks pending surveys, then a notification with event_type='survey_available' is created for P and `notification_sent` is set to true. On P's next login, the notification is NOT created again for the same survey.
+- AC-SURV-3: Given Patient P submits `doctor_star_rating=5, overall_star_rating=4, comment="Excellent care"`, then `submitted_at` is set and a subsequent POST to the same survey returns 409 Conflict (already submitted).
+- AC-SURV-4: Given Admin calls `PATCH /admin/surveys/{id}/remove-comment`, then the survey's `comment` field becomes null and `is_comment_removed` becomes true. The star ratings are unchanged. A subsequent `GET /admin/surveys/{id}` shows is_comment_removed=true and comment=null.
+- AC-SURV-5: Given a survey's `expires_at` has passed and `submitted_at` is null, when Patient P attempts to POST a submission, then the response is 403 Forbidden (or 400 Bad Request — Sagar to decide the appropriate code) and no submission is recorded.
+
+#### Priority: Medium
+
+---
+
+### 9.12 REQ-12 — Corporate Health Check Packages (B2B) (Medium)
+
+**Description**: A public-facing Corporate Health Packages section on the public site (no login required) showing tiered health check packages for businesses. Visitors can submit an inquiry form. Admin manages packages (create, edit, deactivate) and tracks the corporate inquiry pipeline (CRM-lite) with status, notes, and deal value.
+
+**Affected roles**: Public visitor (view packages, submit inquiry), Admin (manage packages + inquiry pipeline).
+
+#### User Stories
+
+- CORP-1: As a visitor, I can view a "Corporate Health Packages" section on the public site listing 2–4 tiered packages, each with a name, tier order/badge, description, list of included services/tests, and displayed pricing range.
+- CORP-2: As a visitor, I can submit a corporate inquiry form with: company name, contact person name, contact email, contact phone, estimated employee headcount, preferred package (dropdown of active packages), and preferred schedule (free text, e.g., "Q1 2027, weekends preferred").
+- CORP-3: As a visitor, after submitting the inquiry form, I see an on-screen success confirmation. No email is sent.
+- CORP-4: As an Admin, I can create, edit, and deactivate corporate packages. A deactivated package is hidden from the public site but remains in the database (referenced by existing inquiries).
+- CORP-5: As an Admin, I can view all corporate inquiries in a pipeline view with filterable status: New, Contacted, Proposal Sent, Closed Won, Closed Lost.
+- CORP-6: As an Admin, I can update the status of an inquiry, add internal notes, and set a deal value (in cents) for inquiries that progress to Closed Won.
+- CORP-7: As an Admin, I can see the total revenue pipeline value: sum of `deal_value_cents` for all inquiries with status='Closed Won', displayed prominently on the pipeline page.
+
+#### Functional Requirements
+
+- CORPFR-1: Packages table fields: `package_id` (PK), `name` (TEXT, NOT NULL), `tier_order` (INTEGER, NOT NULL — used for display order), `description` (TEXT, NOT NULL), `included_services_json` (TEXT — JSON array of service strings), `price_range_display` (TEXT — a human-readable string, e.g., "$500–$800 per employee", stored as text, not as two integer fields; this is marketing copy), `is_active` (INTEGER, default 1). Only active packages (`is_active=1`) are returned by public endpoints.
+- CORPFR-2: Package admin endpoints: `GET /admin/corporate/packages`, `POST /admin/corporate/packages`, `PUT /admin/corporate/packages/{id}`, `DELETE /admin/corporate/packages/{id}` (soft delete: sets `is_active=0`, does not delete the row). Public endpoint: `GET /public/corporate/packages` (returns active packages only, ordered by `tier_order`).
+- CORPFR-3: Inquiry form fields: `company_name` (TEXT, required), `contact_name` (TEXT, required), `email` (TEXT, required, basic email format validation), `phone` (TEXT, nullable), `headcount` (INTEGER, nullable, must be > 0 if provided), `package_id` (FK → corporate_packages, nullable — visitor may not specify a package), `preferred_schedule` (TEXT, nullable), `status` (TEXT, default 'New', CHECK IN ('New','Contacted','ProposalSent','ClosedWon','ClosedLost')), `notes` (TEXT, nullable), `deal_value_cents` (INTEGER, nullable, ≥ 0), `created_at`, `updated_at`.
+- CORPFR-4: Public inquiry submission endpoint: `POST /public/corporate/inquiries` (no auth required). On success, returns 201 Created with a confirmation message. No notification is created in the `notifications` table for this (Admin can see all inquiries via their pipeline view).
+- CORPFR-5: Admin inquiry pipeline endpoints: `GET /admin/corporate/inquiries` (paginated, filterable by `?status=`), `GET /admin/corporate/inquiries/{id}`, `PATCH /admin/corporate/inquiries/{id}` (body: any subset of `{ status, notes, deal_value_cents }`). Inquiries cannot be deleted — only status can be advanced.
+- CORPFR-6: Revenue pipeline total endpoint: included in the pipeline list response as a top-level field: `{ "items": [...], "total": N, "pipeline_total_cents": 1234500, ... }` where `pipeline_total_cents = SUM(deal_value_cents) WHERE status='ClosedWon'`.
+- CORPFR-7: The corporate packages section location on the public site (new nav item? sub-section of About or Departments? standalone page?) is Sagar's decision in Phase 3 (Open Item OI-10 in Section 9.18). However, it must be reachable without login and must be indexed by the public nav in some form.
+
+#### Non-Functional Requirements
+
+- CORPNFR-1: The corporate inquiry pipeline is accessible to Admin only. Any non-Admin role calling `/admin/corporate/*` receives 403 Forbidden.
+- CORPNFR-2: The public `/public/corporate/packages` and `/public/corporate/inquiries` (POST only) endpoints require no authentication — consistent with other public endpoints.
+
+#### Acceptance Criteria
+
+- AC-CORP-1: Given Admin creates a package with tier_order=1, name="Basic", is_active=1, when a visitor calls `GET /public/corporate/packages`, then the package appears in the response ordered by tier_order.
+- AC-CORP-2: Given Admin deactivates a package (is_active=0), when a visitor calls `GET /public/corporate/packages`, then the deactivated package is absent from the response.
+- AC-CORP-3: Given a visitor submits a valid inquiry form (company_name, contact_name, email), when the POST is processed, then a `corporate_inquiries` row exists with status='New' and the visitor sees a 201 response.
+- AC-CORP-4: Given Admin updates inquiry status to 'ClosedWon' and sets deal_value_cents=500000, when `GET /admin/corporate/inquiries` is called, then `pipeline_total_cents` in the response includes this inquiry's deal value.
+- AC-CORP-5: Given a non-Admin user calls `GET /admin/corporate/inquiries`, then the response is 403 Forbidden.
+- AC-CORP-6: Given `headcount=-5` is submitted in the inquiry form, then the response is 400 Bad Request.
+
+#### Priority: Medium
+
+---
+
+### 9.13 Out of Scope — Updates (Batch 2)
+
+The following items previously listed in Section 4's Out of Scope list are now IN SCOPE as of this batch:
+
+- ~~"Waitlist management for fully booked doctors"~~ — **Now in scope as REQ-09.** Remove from Section 4.
+- ~~"Data export/interoperability tools (CSV/PDF export of records) beyond what's explicitly listed above"~~ — **Partially in scope: patient medical record PDF export (REQ-08) is now in scope. Admin analytics CSV export (REQ-06) is also now in scope.** The remaining items in that bullet (HL7/FHIR, general data portability tools) remain out of scope. Update Section 4 to narrow the exclusion to: "General data export/interoperability tools beyond the patient medical record PDF (REQ-08) and the admin analytics CSV (REQ-06), such as HL7/FHIR feeds, bulk data exports, and CSV export of clinical records."
+
+Additionally, the following new out-of-scope clarifications apply to items introduced in this batch:
+
+- Doctor public profile aggregate rating visibility (whether to show rating on the unauthenticated public doctor profile page) — deferred pending Open Item OI-9 resolution.
+- Lab result file attachment (binary) embedding in the medical record PDF — out of scope (PDFFR-6). Text/values from result_data only.
+- Per-doctor waitlist confirmation window configuration — out of scope (only global admin-configurable window in this build, per WLFR-6).
+- Referral data in the patient medical record PDF — out of scope for this build (REFNFR-1).
+- Discharge summary amendments after initial submission — out of scope (DSFR-8).
+- A limit on the number of times a waitlist patient can be "moved to back" — out of scope; no removal policy in this build.
+- Real background job processing for appointment reminders and survey notifications — out of scope (poll-on-login pattern used per NOTIFFR-3 and SURVFR-2).
+- Survey data visible to patients after submission — out of scope (SURVFR-4; patients submit but cannot review their own submitted ratings).
+
+---
+
+### 9.14 Pre-Existing Schema Gap — Vitals Table (Resolved Here)
+
+**Issue**: STF-4 (Section 2.4) has been in scope since the original requirements, allowing Staff to record vital signs (height, weight, blood pressure, temperature, pulse). No backing `vitals` table was defined in `db/schema.sql`. This gap is resolved as part of REQ-04.
+
+**Resolution**: A `vitals` table must be added to `db/schema.sql` with the columns defined in VITFR-1 (Section 9.4). The existing `consultation_hours TEXT` column on `doctors` is unrelated (it is a doctor's stated hours, not patient vitals). No existing data is affected by adding the new table.
+
+Sagar must include this table in the `db/schema.sql` update in Phase 4.
+
+---
+
+### 9.15 New Data Entities — Batch 2
+
+The following entities are added to the data model (extending Section 3.4). Sagar must formalize these as SQL DDL in `db/schema.sql` and in `docs/architecture.md`.
+
+- **DoctorAvailabilitySchedule**: `schedule_id` (PK), `doctor_id` (FK → doctors), `day_of_week` (INTEGER, 0=Mon, 6=Sun), `start_time` (TEXT, HH:MM), `end_time` (TEXT, HH:MM), `is_active` (INTEGER, default 1). Multiple rows per doctor per day allowed. UNIQUE constraint: (doctor_id, day_of_week, start_time).
+- **DoctorSlotConfig**: `config_id` (PK), `doctor_id` (FK → doctors, UNIQUE), `slot_duration_minutes` (INTEGER, NOT NULL, default 30, CHECK IN (10,15,20,30,45,60)), `updated_at` (TEXT). One row per doctor.
+- **DoctorAvailabilityBlock**: `block_id` (PK), `doctor_id` (FK → doctors), `block_date` (TEXT, YYYY-MM-DD), `start_time` (TEXT, HH:MM, nullable), `end_time` (TEXT, HH:MM, nullable), `reason` (TEXT, nullable), `created_at` (TEXT). Constraint: if start_time is non-null then end_time must also be non-null and vice versa.
+- **Notification**: `notification_id` (PK), `recipient_user_id` (FK → users), `event_type` (TEXT, NOT NULL), `title` (TEXT, NOT NULL), `body` (TEXT, NOT NULL), `related_entity_type` (TEXT, nullable), `related_entity_id` (INTEGER, nullable), `is_read` (INTEGER, NOT NULL, default 0, CHECK IN (0,1)), `created_at` (TEXT).
+- **NotificationSchedule** (for deferred triggers): `schedule_id` (PK), `appointment_id` (FK → appointments, nullable), `survey_id` (FK → satisfaction_surveys, nullable), `trigger_type` (TEXT, e.g. 'appointment_reminder', 'survey_available'), `trigger_at` (TEXT, ISO 8601), `is_fired` (INTEGER, default 0, CHECK IN (0,1)), `created_at` (TEXT).
+- **IntakeForm**: `intake_form_id` (PK), `appointment_id` (FK → appointments, UNIQUE), `patient_id` (FK → patients), `chief_complaint` (TEXT, nullable), `symptom_duration` (TEXT, nullable), `allergies` (TEXT, nullable), `current_medications` (TEXT, nullable), `pain_scale` (INTEGER, nullable, CHECK BETWEEN 1 AND 10), `additional_notes` (TEXT, nullable), `submitted_at` (TEXT, nullable), `created_at` (TEXT).
+- **Vitals**: `vital_id` (PK), `patient_id` (FK → patients), `appointment_id` (FK → appointments, nullable), `recorded_by_user_id` (FK → users), `systolic_bp` (INTEGER, nullable), `diastolic_bp` (INTEGER, nullable), `weight_kg` (REAL, nullable), `pulse_bpm` (INTEGER, nullable), `temperature_celsius` (REAL, nullable), `height_cm` (REAL, nullable), `recorded_at` (TEXT, NOT NULL).
+- **Referral**: `referral_id` (PK), `referring_doctor_id` (FK → doctors), `receiving_department_id` (FK → departments), `receiving_doctor_id` (FK → doctors, nullable), `patient_id` (FK → patients), `reason` (TEXT, NOT NULL), `urgency` (TEXT, NOT NULL, CHECK IN ('Routine','Urgent')), `status` (TEXT, NOT NULL, CHECK IN ('Pending','Accepted','Declined','AppointmentBooked','Completed')), `receiving_doctor_note` (TEXT, nullable), `referred_appointment_id` (FK → appointments, nullable), `created_at` (TEXT), `updated_at` (TEXT).
+- **DepartmentSymptomTag**: `tag_id` (PK), `department_id` (FK → departments), `tag_text` (TEXT, NOT NULL), `created_at` (TEXT). UNIQUE(department_id, LOWER(tag_text)) — case-insensitive uniqueness enforced application-side since SQLite's LOWER() in a UNIQUE index requires a functional index workaround; enforce in application layer.
+- **WaitlistEntry**: `entry_id` (PK), `patient_id` (FK → patients), `doctor_id` (FK → doctors), `preferred_date` (TEXT, nullable), `status` (TEXT, NOT NULL, CHECK IN ('Waiting','Notified','Confirmed','Expired','Removed')), `notified_at` (TEXT, nullable), `confirmation_deadline` (TEXT, nullable), `created_at` (TEXT). Index on (doctor_id, status, created_at) for FIFO queue queries.
+- **SystemConfig**: `config_key` (TEXT, PK), `config_value` (TEXT, NOT NULL), `updated_at` (TEXT). Single-row-per-key config store. Initial rows: ('waitlist_confirmation_hours', '4').
+- **DischargeSummary**: `summary_id` (PK), `appointment_id` (FK → appointments, UNIQUE), `patient_id` (FK → patients), `doctor_id` (FK → doctors), `key_findings` (TEXT, NOT NULL), `patient_instructions` (TEXT, nullable), `activity_restrictions` (TEXT, nullable), `medication_reminders` (TEXT, nullable), `follow_up_appointment_id` (FK → appointments, nullable), `created_at` (TEXT).
+- **SatisfactionSurvey**: `survey_id` (PK), `appointment_id` (FK → appointments, UNIQUE), `patient_id` (FK → patients), `doctor_id` (FK → doctors), `trigger_after` (TEXT, NOT NULL), `expires_at` (TEXT, NOT NULL), `notification_sent` (INTEGER, NOT NULL, default 0, CHECK IN (0,1)), `submitted_at` (TEXT, nullable), `doctor_star_rating` (INTEGER, nullable, CHECK BETWEEN 1 AND 5), `overall_star_rating` (INTEGER, nullable, CHECK BETWEEN 1 AND 5), `comment` (TEXT, nullable), `is_comment_removed` (INTEGER, NOT NULL, default 0, CHECK IN (0,1)).
+- **CorporatePackage**: `package_id` (PK), `name` (TEXT, NOT NULL), `tier_order` (INTEGER, NOT NULL), `description` (TEXT, NOT NULL), `included_services_json` (TEXT, NOT NULL), `price_range_display` (TEXT, NOT NULL), `is_active` (INTEGER, NOT NULL, default 1, CHECK IN (0,1)), `created_at` (TEXT).
+- **CorporateInquiry**: `inquiry_id` (PK), `company_name` (TEXT, NOT NULL), `contact_name` (TEXT, NOT NULL), `email` (TEXT, NOT NULL), `phone` (TEXT, nullable), `headcount` (INTEGER, nullable, CHECK(headcount > 0)), `package_id` (FK → corporate_packages, nullable), `preferred_schedule` (TEXT, nullable), `status` (TEXT, NOT NULL, DEFAULT 'New', CHECK IN ('New','Contacted','ProposalSent','ClosedWon','ClosedLost')), `notes` (TEXT, nullable), `deal_value_cents` (INTEGER, nullable, CHECK(deal_value_cents >= 0)), `created_at` (TEXT), `updated_at` (TEXT).
+
+---
+
+### 9.16 Updated Role-Based Access Control — Batch 2 Additions
+
+The following rows extend (and do not replace) the RBAC tables in Sections 3.3 and 8.5.
+
+| Resource | Admin | Doctor | Patient | Staff | Lab | BillingSpecialist |
+|---|---|---|---|---|---|---|
+| Doctor availability schedule & blocks | Full CRUD (all doctors) | Own only (CRUD) | Read (via slot query only) | Read (via slot query only) | None | None |
+| In-app notifications | Read all (admin view — for audit if needed) | Own only | Own only | Own only | Own only | Own only |
+| Intake forms | Read all (read-only) | Read (own patients only) | Own only (read/write until Completed) | Read all (read-only) | None | None |
+| Vitals | Read all | Read (own patients only) | None (own vitals not directly queryable — included in PDF/record views) | Create + read all | None | None |
+| Referrals | Read all (limited fields per REFNFR-2) | Create (for own patients) + accept/decline (own dept) + read own | Read own referrals (status only) | None | None | None |
+| Analytics dashboard | Full access | None (403) | None (403) | None (403) | None (403) | None (403) |
+| Symptom tags | Full CRUD | None | None | None | None | None |
+| Public search | N/A (public) | N/A (public) | N/A (public) | N/A (public) | N/A (public) | N/A (public) |
+| Patient PDF export | None (403) | None (403) | Own only | None (403) | None (403) | None (403) |
+| Waitlist entries | Read all + delete any | None | Own only (create, view, remove self, confirm) | Read all + delete any | None | None |
+| Discharge summaries | Read all | Create + read (own patients only) | Read own only | Read all | None | None |
+| Satisfaction surveys | Read all + moderate comments | Read own aggregate + anonymized comments | Create (own, if triggered) + read own submission status | None | None | None |
+| Corporate packages | Full CRUD | None | None | None | None | None |
+| Corporate inquiries | Full pipeline management | None | None | None | None | None |
+
+New explicit authorization rules (additive to AUTHZ-1 through AUTHZ-10):
+
+- AUTHZ-11: Patient PDF export is strictly patient-self-service. No other role — including Admin or Doctor — may trigger a PDF export for a patient via the `/patients/me/export-pdf` endpoint. If Admin needs a patient record export, that is a separate future requirement.
+- AUTHZ-12: Analytics endpoints under `/admin/analytics/*` are Admin-only. Role check at the router level returns 403 for all other roles before any database query is executed.
+- AUTHZ-13: A Doctor may only accept/decline referrals directed to their own department. A Doctor in Department A cannot act on a referral directed to Department B.
+- AUTHZ-14: Survey submissions are tied to the authenticated patient's own appointments only. A Patient cannot submit a survey for another patient's appointment.
+
+---
+
+### 9.17 Acceptance Criteria — Cross-Cutting (Batch 2)
+
+These criteria apply across multiple requirements in this batch and are intended to be tested as integration scenarios.
+
+- AC-BATCH2-1 (End-to-end booking with availability): Given a Doctor has a weekly schedule configured with 30-minute slots and no one-off blocks for a given Monday, when a Patient queries available slots for that Monday and books the first available slot, then the slot no longer appears in the available-slots response for that date, and an `appointment_confirmed` notification is created for both the Patient and the Doctor.
+- AC-BATCH2-2 (Waitlist-to-booking pipeline): Given Patient A is #1 on Doctor D's waitlist, when an existing appointment with Doctor D is cancelled, then Patient A receives a 'waitlist_slot_available' notification within the same cancellation request, A's entry status changes to 'Notified', and if A confirms within the window, a new Scheduled appointment is created and A's entry moves to 'Confirmed'.
+- AC-BATCH2-3 (Discharge-to-survey pipeline): Given Doctor D marks Appointment X as Completed and creates a discharge summary, then (a) a 'discharge_summary_ready' notification is created for the Patient, (b) a SatisfactionSurvey row is created with trigger_after = now + 24h, (c) when the Patient logs in 25 hours later, a 'survey_available' notification is created and notification_sent is set to true on the survey row.
+- AC-BATCH2-4 (Role isolation on analytics): Given each of the six roles has a valid JWT, when each calls `GET /admin/analytics/appointments`, then only the Admin role receives a 200 response with data. All other roles receive 403 Forbidden.
+- AC-BATCH2-5 (Notification unread count across events): Given a Patient has 0 notifications, when they book an appointment (creates appointment_confirmed), a lab result is finalized (creates lab_result_ready), and an invoice is created (creates invoice_created), then `GET /notifications/unread-count` returns `{ "unread_count": 3 }`.
+
+---
+
+### 9.18 Open Items for Architecture Stage (Batch 2)
+
+The following items must be resolved by Sagar in Phase 3/4 before design is locked. Items marked with a Krishna escalation flag require a client decision, not just a technical decision — Sagar must route those to Akhil/Krishna before proceeding.
+
+| ID | Requirement | Question | Escalate to Krishna? |
+|---|---|---|---|
+| OI-1 | REQ-01 | Can both Admin AND Doctor configure a doctor's availability? Or is it Admin-only (with doctor able to request changes via a workflow)? | Yes — Krishna must confirm who the owner of a doctor's schedule is |
+| OI-2 | REQ-02 / REQ-11 | Poll-on-login pattern for deferred notifications: is this acceptable UX (notification appears on next login, not at the exact 24h mark)? | Yes — Krishna should confirm acceptable latency for reminders and survey notifications |
+| OI-3 | REQ-08 | PDF library choice for FastAPI/Python: WeasyPrint (HTML-to-PDF, easier template) vs ReportLab (programmatic, more control)? | No — Sagar decides |
+| OI-4 | REQ-04 | Chart library for React 19: Recharts vs react-chartjs-2 vs Nivo? | No — Sagar decides |
+| OI-5 | REQ-05 | When a receiving doctor declines a referral, does it return to Pending (allowing another doctor in the department to accept) or does it stay Declined permanently? Krishna's requirement text implied a single Declined state but this may trap a referral | Yes — Krishna clarification needed |
+| OI-6 | REQ-05 | Should Admin see the `reason` (clinical text) field on referrals, or only operational fields (dept, doctor, urgency, status)? | Yes — policy decision for Krishna |
+| OI-7 | REQ-06 | Revenue "collected" series: use `invoices.created_at WHERE status='Paid'` (current simplification) or add a `paid_at` column to `invoices` for accurate month-of-payment reporting? | Yes — Krishna to decide if the approximation is acceptable |
+| OI-8 | REQ-10 | Discharge summary + follow-up appointment: should the endpoint create them atomically in one transaction (better for integrity) or as two separate calls (simpler for the frontend to handle errors)? | No — Sagar decides; recommendation is atomic |
+| OI-9 | REQ-11 | Should the doctor's aggregate star rating (average + count, no comments) be publicly visible on the unauthenticated doctor profile page? | Yes — Krishna must decide whether ratings are public-facing |
+| OI-10 | REQ-12 | Where does the Corporate Packages section appear in the public site navigation? New top-level nav item? Sub-page of About? Separate footer link? | Yes — Sagar should propose in Phase 3 UX, then Krishna approves |
+| OI-11 | REQ-02 | For `contact_form_received` notification — should it go to ALL active Admin+Staff users (could be a large fan-out), or only to Admin users? Or to a designated "contact" Staff role? | Yes — Krishna should clarify expected recipients |
+| OI-12 | REQ-09 | Is the waitlist per-doctor only, or per-doctor-per-date (patient specifies a preferred date when joining, and is only notified when that specific date has a cancellation)? | Yes — Krishna clarification needed |
+| OI-13 | REQ-01 | What happens to in-progress bookings (patient is on the slot-selection screen) when a doctor updates their availability mid-session? Is a session lock needed, or is the existing unique index sufficient? | No — Sagar decides; recommendation is unique index is sufficient with the 409 Conflict response |
+| OI-14 | REQ-06 | What are the exact preset labels and durations for the date range picker? Proposed: Last 7 days, Last 30 days, Last 3 months, Last 12 months, Year to date, All time. Confirm or adjust. | Yes — Krishna to confirm or adjust |
+| OI-15 | REQ-07 | Should the public search bar be embedded in the existing nav (all public pages) or only on a dedicated /search page? | Yes — Sagar to propose in Phase 3, Krishna approves |
+| OI-16 | REQ-03 | Is there a cutoff time before which the intake form must be submitted (e.g., must be submitted at least 1 hour before the appointment)? Or can the patient submit it at any time before the appointment is marked Completed? | Yes — Krishna to clarify |
+| OI-17 | REQ-12 | Should corporate inquiry submission trigger an in-app notification to Admin users (similar to contact_form_received)? | Yes — Krishna to clarify |
+| OI-18 | REQ-11 | Should the Doctor's rating section be accessible as part of Phase 3's public doctor profile redesign? (Implies a public aggregate rating endpoint.) | Linked to OI-9 |
