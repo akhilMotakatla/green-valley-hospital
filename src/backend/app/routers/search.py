@@ -49,7 +49,7 @@ class TagOut(BaseModel):
 
 @router.get("/public/search")
 def public_search(
-    q: str = Query(..., min_length=2),
+    q: str = Query(...),
     db: Session = Depends(get_db),
 ):
     q_str = q.strip()[:200]
