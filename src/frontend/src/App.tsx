@@ -17,6 +17,7 @@ import { LoginPage } from './pages/public/LoginPage';
 import { SignupPage } from './pages/public/SignupPage';
 import { UnauthorizedPage } from './pages/shared/UnauthorizedPage';
 import { NotFoundPage } from './pages/shared/NotFoundPage';
+import { NotificationsPage } from './pages/shared/NotificationsPage';
 
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { AdminDoctorAvailabilityPage } from './pages/admin/AdminDoctorAvailabilityPage';
@@ -86,6 +87,7 @@ function App() {
             <Route path="/admin" element={<AdminDashboardPage />} />
             <Route path="/admin/users" element={<AdminUsersPage />} />
             <Route path="/admin/users/:userId/availability" element={<AdminDoctorAvailabilityPage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/admin/departments" element={<AdminDepartmentsPage />} />
             <Route path="/admin/appointments" element={<AdminAppointmentsPage />} />
             <Route path="/admin/invoices" element={<AdminInvoicesPage />} />
@@ -106,6 +108,7 @@ function App() {
             <Route path="/doctor/availability" element={<DoctorAvailabilityPage />} />
             <Route path="/doctor/patients/:patientId" element={<DoctorPatientRecordsPage />} />
             <Route path="/doctor/profile" element={<DoctorProfilePage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 
           {/* Patient */}
@@ -121,6 +124,7 @@ function App() {
             <Route path="/patient/records" element={<PatientRecordsPage />} />
             <Route path="/patient/invoices" element={<PatientInvoicesPage />} />
             <Route path="/patient/profile" element={<PatientProfilePage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 
           {/* Staff */}
@@ -137,6 +141,7 @@ function App() {
             <Route path="/staff/appointments" element={<StaffAppointmentsPage />} />
             <Route path="/staff/contact-messages" element={<StaffContactMessagesPage />} />
             <Route path="/staff/directory" element={<StaffDirectoryPage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 
           {/* Lab */}
@@ -148,6 +153,7 @@ function App() {
             }
           >
             <Route path="/lab" element={<LabOrdersPage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 
           {/* Billing Specialist */}
@@ -164,6 +170,7 @@ function App() {
             <Route path="/billing/patients" element={<BillingPatientsPage />} />
             <Route path="/billing/appointments" element={<BillingAppointmentsPage />} />
             <Route path="/billing/notifications" element={<BillingNotificationsPage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 
           <Route path="*" element={<NotFoundPage />} />

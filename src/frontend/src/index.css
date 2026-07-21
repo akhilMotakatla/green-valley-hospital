@@ -2425,6 +2425,196 @@ tr:last-child td {
 }
 
 /* ============================================================
+   REQ-02: Notification Bell + Panel + Page
+   ============================================================ */
+
+/* Bell button wrapper — relative for badge positioning */
+.notif-bell-btn {
+  position: relative;
+}
+
+/* Unread count badge */
+.notif-badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--color-danger, #dc2626);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Dropdown panel */
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 340px;
+  max-height: 460px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  z-index: 1200;
+  overflow: hidden;
+}
+
+.notif-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.notif-panel-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.notif-mark-all-btn {
+  font-size: 0.8125rem;
+  color: var(--color-primary-dark);
+}
+
+.notif-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 80px;
+}
+
+.notif-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  gap: 0.5rem;
+  color: var(--color-text-light);
+  font-size: 0.875rem;
+  text-align: center;
+}
+.notif-panel-error { color: var(--color-danger, #dc2626); }
+
+.notif-panel-footer {
+  border-top: 1px solid var(--color-border);
+  padding: 0.625rem 1rem;
+  flex-shrink: 0;
+  text-align: center;
+}
+.notif-see-all-link {
+  font-size: 0.875rem;
+  color: var(--color-primary-dark);
+  text-decoration: none;
+  font-weight: 500;
+}
+.notif-see-all-link:hover { text-decoration: underline; }
+
+/* Notification list (panel + page) */
+.notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background 120ms;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: var(--color-primary-light, #ebf4ff); }
+.notif-item--unread { background: var(--color-primary-light, #ebf4ff); }
+
+.notif-unread-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary, #0074c5);
+  margin-top: 4px;
+}
+
+.notif-content { flex: 1; min-width: 0; }
+
+.notif-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 0.2rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notif-body {
+  font-size: 0.8125rem;
+  color: var(--color-text-light);
+  margin: 0 0 0.25rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notif-time {
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #9ca3af);
+}
+
+/* Full notifications page */
+.notif-page-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+.notif-page-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.notif-page-item:last-child { border-bottom: none; }
+.notif-page-item--unread { background: var(--color-primary-light, #ebf4ff); }
+
+.notif-page-content { flex: 1; min-width: 0; }
+.notif-page-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.notif-type-badge {
+  display: inline-block;
+  margin-top: 0.35rem;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  background: var(--color-bg-alt, #f3f4f6);
+  color: var(--color-text-light);
+  text-transform: lowercase;
+}
+
+/* ============================================================
    REQ-01: SlotPicker component
    ============================================================ */
 .slot-btn {
