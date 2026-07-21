@@ -304,6 +304,8 @@ class Invoice(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="Pending")
     # v1.2 (Section 8.4.2): boolean flag for insurance claim filing. 0 = no claim, 1 = claim filed.
     has_insurance_claim: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Batch 2 (OI-7): set server-side when status transitions to 'Paid'; used by revenue analytics.
+    paid_at: Mapped[str | None] = mapped_column(String, nullable=True)
     created_by_user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -390,32 +392,35 @@ class AuditLogEntry(Base):
 
 
 class Vitals(Base):
-    """Supports STF-4 (Staff records patient vitals ahead of a consultation).
-    Not in requirements.md §3.4's original entity list; added per
-    docs/api-spec.md §6's explicit flag.
+    """Patient vitals recorded by Staff — resolves pre-existing STF-4 schema gap.
+    Schema aligned with Batch 2 db/schema.sql (REQ-04) which introduced separate
+    systolic_bp / diastolic_bp columns and the vital_id PK name.
     """
 
     __tablename__ = "vitals"
 
-    vitals_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    vital_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     patient_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("patients.patient_id", ondelete="CASCADE"), nullable=False
+    )
+    appointment_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("appointments.appointment_id", ondelete="SET NULL"), nullable=True
     )
     recorded_by_user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
-    recorded_for_appointment_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("appointments.appointment_id", ondelete="SET NULL"), nullable=True
-    )
-    height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    systolic_bp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    diastolic_bp: Mapped[int | None] = mapped_column(Integer, nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
-    blood_pressure: Mapped[str | None] = mapped_column(String, nullable=True)
-    temperature_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     pulse_bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+    temperature_celsius: Mapped[float | None] = mapped_column(Float, nullable=True)
+    height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recorded_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
 
     __table_args__ = (
         Index("idx_vitals_patient", "patient_id"),
+        Index("idx_vitals_appointment", "appointment_id"),
+        Index("idx_vitals_recorded_at", "recorded_at"),
     )
 
 
@@ -490,3 +495,367 @@ class EmailNotification(Base):
     )
 
     recipient: Mapped[User] = relationship("User")
+
+
+# ============================================================
+# Batch 2 models (2026-07-20 — REQ-01 through REQ-12)
+# db/schema.sql Batch 2 block is the canonical DDL source.
+# ============================================================
+
+
+class DoctorAvailabilitySchedule(Base):
+    """REQ-01: Weekly recurring availability windows per doctor per day-of-week."""
+    __tablename__ = "doctor_availability_schedules"
+
+    schedule_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    doctor_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("doctors.doctor_id", ondelete="CASCADE"), nullable=False
+    )
+    day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)  # 0=Monday, 6=Sunday
+    start_time: Mapped[str] = mapped_column(String, nullable=False)    # HH:MM
+    end_time: Mapped[str] = mapped_column(String, nullable=False)      # HH:MM
+    is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        CheckConstraint("day_of_week BETWEEN 0 AND 6", name="ck_das_dow"),
+        CheckConstraint("is_active IN (0,1)", name="ck_das_is_active"),
+        UniqueConstraint("doctor_id", "day_of_week", "start_time", name="uq_das_doctor_dow_start"),
+        Index("idx_avail_schedules_doctor", "doctor_id"),
+    )
+
+    doctor: Mapped[Doctor] = relationship("Doctor")
+
+
+class DoctorSlotConfig(Base):
+    """REQ-01: Slot duration configuration — one row per doctor (default 30 min)."""
+    __tablename__ = "doctor_slot_configs"
+
+    config_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    doctor_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("doctors.doctor_id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    slot_duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        CheckConstraint(
+            "slot_duration_minutes IN (10,15,20,30,45,60)", name="ck_dsc_slot_duration"
+        ),
+    )
+
+    doctor: Mapped[Doctor] = relationship("Doctor")
+
+
+class DoctorAvailabilityBlock(Base):
+    """REQ-01: One-off date blocks overriding weekly schedule.
+    start_time=NULL + end_time=NULL = full-day block.
+    """
+    __tablename__ = "doctor_availability_blocks"
+
+    block_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    doctor_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("doctors.doctor_id", ondelete="CASCADE"), nullable=False
+    )
+    block_date: Mapped[str] = mapped_column(String, nullable=False)     # YYYY-MM-DD
+    start_time: Mapped[str | None] = mapped_column(String, nullable=True)   # HH:MM or NULL
+    end_time: Mapped[str | None] = mapped_column(String, nullable=True)     # HH:MM or NULL
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        Index("idx_avail_blocks_doctor", "doctor_id"),
+        Index("idx_avail_blocks_date", "block_date"),
+    )
+
+    doctor: Mapped[Doctor] = relationship("Doctor")
+
+
+class Notification(Base):
+    """REQ-02: In-app notification inbox per user."""
+    __tablename__ = "notifications"
+
+    notification_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recipient_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    related_entity_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    related_entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_read: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        CheckConstraint("is_read IN (0,1)", name="ck_notifications_is_read"),
+        Index("idx_notifications_recipient_read", "recipient_user_id", "is_read"),
+        Index("idx_notifications_created_at", "created_at"),
+    )
+
+    recipient: Mapped[User] = relationship("User")
+
+
+class NotificationSchedule(Base):
+    """REQ-02: Deferred notification triggers (poll-on-login pattern, OI-2)."""
+    __tablename__ = "notification_schedules"
+
+    schedule_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    appointment_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("appointments.appointment_id", ondelete="CASCADE"), nullable=True
+    )
+    survey_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # soft FK to satisfaction_surveys
+    trigger_type: Mapped[str] = mapped_column(String, nullable=False)
+    trigger_at: Mapped[str] = mapped_column(String, nullable=False)   # ISO 8601 UTC
+    is_fired: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        CheckConstraint(
+            "trigger_type IN ('appointment_reminder','survey_available')",
+            name="ck_ns_trigger_type",
+        ),
+        CheckConstraint("is_fired IN (0,1)", name="ck_ns_is_fired"),
+        Index("idx_notif_schedules_poll", "trigger_at", "is_fired"),
+    )
+
+
+class IntakeForm(Base):
+    """REQ-03: Pre-visit intake forms. Auto-created (empty) on appointment booking."""
+    __tablename__ = "intake_forms"
+
+    intake_form_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    appointment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("appointments.appointment_id", ondelete="CASCADE"),
+        nullable=False, unique=True
+    )
+    patient_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("patients.patient_id", ondelete="CASCADE"), nullable=False
+    )
+    chief_complaint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    symptom_duration: Mapped[str | None] = mapped_column(String, nullable=True)
+    allergies: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_medications: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pain_scale: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    additional_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    submitted_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        CheckConstraint("pain_scale BETWEEN 1 AND 10", name="ck_intake_pain_scale"),
+        Index("idx_intake_forms_appointment", "appointment_id"),
+        Index("idx_intake_forms_patient", "patient_id"),
+    )
+
+
+class WaitlistEntry(Base):
+    """REQ-09: Per-doctor-per-date waitlist entries (OI-12)."""
+    __tablename__ = "waitlist_entries"
+
+    entry_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    patient_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("patients.patient_id", ondelete="CASCADE"), nullable=False
+    )
+    doctor_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("doctors.doctor_id", ondelete="CASCADE"), nullable=False
+    )
+    preferred_date: Mapped[str] = mapped_column(String, nullable=False)    # YYYY-MM-DD
+    status: Mapped[str] = mapped_column(String, nullable=False, default="Waiting")
+    notified_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    confirmation_deadline: Mapped[str | None] = mapped_column(String, nullable=True)
+    held_slot_time: Mapped[str | None] = mapped_column(String, nullable=True)  # HH:MM
+    removed_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('Waiting','Notified','Confirmed','Expired','Removed')",
+            name="ck_we_status",
+        ),
+        Index("idx_waitlist_doctor_date_queue", "doctor_id", "preferred_date", "status", "created_at"),
+        Index("idx_waitlist_patient", "patient_id"),
+    )
+
+    patient: Mapped[Patient] = relationship("Patient")
+    doctor: Mapped[Doctor] = relationship("Doctor")
+
+
+class SystemConfig(Base):
+    """System-wide key-value configuration store."""
+    __tablename__ = "system_config"
+
+    config_key: Mapped[str] = mapped_column(String, primary_key=True)
+    config_value: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+
+class DischargeSummary(Base):
+    """REQ-10: Discharge summaries. 1:1 with completed appointments."""
+    __tablename__ = "discharge_summaries"
+
+    summary_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    appointment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("appointments.appointment_id", ondelete="RESTRICT"),
+        nullable=False, unique=True
+    )
+    patient_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("patients.patient_id", ondelete="CASCADE"), nullable=False
+    )
+    doctor_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("doctors.doctor_id", ondelete="RESTRICT"), nullable=False
+    )
+    key_findings: Mapped[str] = mapped_column(Text, nullable=False)
+    patient_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    activity_restrictions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    medication_reminders: Mapped[str | None] = mapped_column(Text, nullable=True)
+    follow_up_appointment_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("appointments.appointment_id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        Index("idx_discharge_patient", "patient_id"),
+        Index("idx_discharge_doctor", "doctor_id"),
+    )
+
+
+class SatisfactionSurvey(Base):
+    """REQ-11: Post-visit satisfaction surveys. 1:1 with completed appointments."""
+    __tablename__ = "satisfaction_surveys"
+
+    survey_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    appointment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("appointments.appointment_id", ondelete="RESTRICT"),
+        nullable=False, unique=True
+    )
+    patient_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("patients.patient_id", ondelete="CASCADE"), nullable=False
+    )
+    doctor_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("doctors.doctor_id", ondelete="RESTRICT"), nullable=False
+    )
+    trigger_after: Mapped[str] = mapped_column(String, nullable=False)   # ISO 8601
+    expires_at: Mapped[str] = mapped_column(String, nullable=False)      # ISO 8601
+    notification_sent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    submitted_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    doctor_star_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    overall_star_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_comment_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        CheckConstraint("notification_sent IN (0,1)", name="ck_ss_notification_sent"),
+        CheckConstraint("is_comment_removed IN (0,1)", name="ck_ss_comment_removed"),
+        Index("idx_surveys_patient", "patient_id"),
+        Index("idx_surveys_doctor", "doctor_id"),
+        Index("idx_surveys_poll", "patient_id", "notification_sent", "submitted_at"),
+    )
+
+
+class CorporatePackage(Base):
+    """REQ-12: B2B health package tiers."""
+    __tablename__ = "corporate_packages"
+
+    package_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    tier_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    included_services_json: Mapped[str] = mapped_column(Text, nullable=False)
+    price_range_display: Mapped[str] = mapped_column(String, nullable=False)
+    is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        CheckConstraint("is_active IN (0,1)", name="ck_cp_is_active"),
+        Index("idx_corp_packages_active", "is_active", "tier_order"),
+    )
+
+
+class CorporateInquiry(Base):
+    """REQ-12: Corporate inquiry pipeline."""
+    __tablename__ = "corporate_inquiries"
+
+    inquiry_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    company_name: Mapped[str] = mapped_column(String, nullable=False)
+    contact_name: Mapped[str] = mapped_column(String, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False)
+    phone: Mapped[str | None] = mapped_column(String, nullable=True)
+    headcount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    package_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("corporate_packages.package_id", ondelete="SET NULL"), nullable=True
+    )
+    preferred_schedule: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="New")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deal_value_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('New','Contacted','ProposalSent','ClosedWon','ClosedLost')",
+            name="ck_ci_status",
+        ),
+        Index("idx_corp_inquiries_status", "status"),
+        Index("idx_corp_inquiries_created_at", "created_at"),
+    )
+
+
+class DepartmentSymptomTag(Base):
+    """REQ-07: Department symptom/condition tags for public search."""
+    __tablename__ = "department_symptom_tags"
+
+    tag_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    department_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("departments.department_id", ondelete="CASCADE"), nullable=False
+    )
+    tag_text: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        Index("idx_symptom_tags_department", "department_id"),
+        Index("idx_symptom_tags_text", "tag_text"),
+    )
+
+    department: Mapped[Department] = relationship("Department")
+
+
+class Referral(Base):
+    """REQ-05: Inter-department referrals."""
+    __tablename__ = "referrals"
+
+    referral_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    referring_doctor_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("doctors.doctor_id", ondelete="RESTRICT"), nullable=False
+    )
+    receiving_department_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("departments.department_id", ondelete="RESTRICT"), nullable=False
+    )
+    receiving_doctor_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("doctors.doctor_id", ondelete="SET NULL"), nullable=True
+    )
+    patient_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("patients.patient_id", ondelete="CASCADE"), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    urgency: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="Pending")
+    receiving_doctor_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    referred_appointment_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("appointments.appointment_id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False, default=_now_iso)
+
+    __table_args__ = (
+        CheckConstraint("urgency IN ('Routine','Urgent')", name="ck_ref_urgency"),
+        CheckConstraint(
+            "status IN ('Pending','Accepted','Declined','AppointmentBooked','Completed')",
+            name="ck_ref_status",
+        ),
+        Index("idx_referrals_patient", "patient_id"),
+        Index("idx_referrals_referring", "referring_doctor_id"),
+        Index("idx_referrals_recv_dept", "receiving_department_id"),
+        Index("idx_referrals_status", "status"),
+        Index("idx_referrals_dept_queue", "receiving_department_id", "status", "urgency", "created_at"),
+    )
