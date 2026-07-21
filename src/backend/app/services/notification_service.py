@@ -160,6 +160,10 @@ def check_and_fire_deferred_notifications(db: Session, user_id: int) -> None:
             }])
             survey.notification_sent = 1
 
+    # 3. Waitlist expiry check (REQ-09)
+    from app.services.waitlist_service import check_waitlist_expiry
+    check_waitlist_expiry(db, user_id)
+
     if pending_schedules or (patient and pending_surveys):
         db.commit()
 

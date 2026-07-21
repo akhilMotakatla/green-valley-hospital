@@ -25,6 +25,7 @@ from app.models import (
 )
 from app.services.availability import get_available_slots
 from app.services.notification_service import create_appointment_reminder_schedule, create_notifications
+from app.services.waitlist_service import trigger_waitlist_on_cancellation
 from app.schemas import (
     ContactMessageStatusRequest,
     StaffAppointmentCreateRequest,
@@ -301,6 +302,8 @@ def update_appointment(appointment_id: int, payload: StaffAppointmentUpdateReque
                 "related_entity_id": appointment.appointment_id,
             })
         create_notifications(db, cancel_events)
+        # REQ-09: Trigger FIFO waitlist cascade for the freed slot
+        trigger_waitlist_on_cancellation(db, appointment)
     elif payload.status == "NoShow" and prev_status != "NoShow":
         # REQ-02: Notify patient that they were marked as a no-show
         patient = db.get(Patient, appointment.patient_id)

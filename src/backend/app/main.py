@@ -11,6 +11,9 @@ from app.database import init_db
 from app.routers import admin, auth, billing, doctor, lab, patient, public, staff
 from app.routers.availability import admin_avail_router, doctor_avail_router, slots_router
 from app.routers.notifications import router as notifications_router
+from app.routers.waitlist import router as waitlist_router
+from app.routers.discharge import router as discharge_router
+from app.routers.surveys import router as surveys_router
 
 app = FastAPI(title="Green Valley Hospital API")
 
@@ -60,3 +63,7 @@ app.include_router(doctor_avail_router, prefix="/api")
 app.include_router(admin_avail_router, prefix="/api")
 # Batch 2: in-app notifications (REQ-02)
 app.include_router(notifications_router, prefix="/api")
+# Batch 2 Group B: waitlist (REQ-09), discharge summaries (REQ-10), surveys (REQ-11)
+app.include_router(waitlist_router, prefix="/api")
+app.include_router(discharge_router, prefix="/api")
+app.include_router(surveys_router, prefix="/api")
