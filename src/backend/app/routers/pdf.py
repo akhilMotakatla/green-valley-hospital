@@ -58,11 +58,12 @@ def export_pdf(
     if patient is None:
         raise HTTPException(status_code=403, detail="Patient profile not found")
 
-    appointments = get_appointments_for_pdf(db, patient.patient_id, start_date, end_date)
+    appointments, lab_results = get_appointments_for_pdf(db, patient.patient_id, start_date, end_date)
     html_content = render_pdf_template(
         patient=patient,
         patient_user=current_user,
         appointments=appointments,
+        lab_results=lab_results,
         start_date=start_date,
         end_date=end_date,
     )

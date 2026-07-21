@@ -5,11 +5,13 @@ the import fails gracefully — the endpoint returns HTTP 503 in that case.
 
 Functions:
   get_appointments_for_pdf(db, patient_id, start_date, end_date)
-  render_pdf_template(patient, patient_user, appointments, start_date, end_date)
+      -> tuple[list[dict], list[dict]]   (appointments, lab_results)
+  render_pdf_template(patient, patient_user, appointments, lab_results, start_date, end_date)
   generate_pdf(html_content) -> bytes
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -42,8 +44,14 @@ def get_appointments_for_pdf(
     patient_id: int,
     start_date: str | None,
     end_date: str | None,
-) -> list[dict]:
-    """Fetch all completed appointments for the patient with associated data."""
+) -> tuple[list[dict], list[dict]]:
+    """Fetch completed appointments and all finalized lab results for the patient.
+
+    Lab results are collected ONCE here, outside the appointment loop, so they
+    are never duplicated across appointment sections in the rendered PDF.
+    Returns (appointments, lab_results) — the caller passes these separately to
+    render_pdf_template so lab results appear in their own top-level section.
+    """
     q = (
         db.query(Appointment)
         .filter(
@@ -58,13 +66,37 @@ def get_appointments_for_pdf(
         q = q.filter(Appointment.scheduled_at <= end_date + "T23:59:59")
 
     appointments = q.all()
+
+    # Collect ALL finalized lab results for this patient exactly once.
+    # Apply the same date range (by finalized_at) when provided.
+    lab_orders_all = (
+        db.query(LabOrder)
+        .filter(LabOrder.patient_id == patient_id)
+        .all()
+    )
+    lab_results: list[dict] = []
+    for lo in lab_orders_all:
+        results_q = (
+            db.query(LabResult)
+            .filter(
+                LabResult.order_id == lo.order_id,
+                LabResult.is_finalized == 1,
+            )
+        )
+        if start_date:
+            results_q = results_q.filter(LabResult.finalized_at >= start_date)
+        if end_date:
+            results_q = results_q.filter(LabResult.finalized_at <= end_date + "T23:59:59")
+        for lr in results_q.all():
+            lab_results.append({
+                "test_type": lo.test_type,
+                "test_subtype": lo.test_subtype,
+                "result_data": lr.result_data,
+                "finalized_at": lr.finalized_at,
+            })
+
     result = []
     for appt in appointments:
-        # Fetch associated data
-        doctor_user = db.query(User).join(
-            "doctors" # workaround — use ORM relationship
-        ).first() if False else None
-        # Direct query approach
         from app.models import Doctor
         doctor = db.query(Doctor).filter(Doctor.doctor_id == appt.doctor_id).first()
         doctor_user = db.get(User, doctor.user_id) if doctor else None
@@ -81,30 +113,6 @@ def get_appointments_for_pdf(
             .filter(Prescription.appointment_id == appt.appointment_id)
             .all()
         )
-        # Finalized lab results only
-        lab_orders = (
-            db.query(LabOrder)
-            .filter(LabOrder.patient_id == patient_id)
-            .all()
-        )
-        lab_results_data = []
-        for lo in lab_orders:
-            results = (
-                db.query(LabResult)
-                .filter(
-                    LabResult.order_id == lo.order_id,
-                    LabResult.is_finalized == 1,
-                )
-                .all()
-            )
-            for lr in results:
-                lab_results_data.append({
-                    "test_type": lo.test_type,
-                    "test_subtype": lo.test_subtype,
-                    "result_data": lr.result_data,
-                    "finalized_at": lr.finalized_at,
-                })
-
         vitals = (
             db.query(Vitals)
             .filter(Vitals.appointment_id == appt.appointment_id)
@@ -121,7 +129,6 @@ def get_appointments_for_pdf(
             .first()
         )
 
-        import json
         result.append({
             "appointment_id": appt.appointment_id,
             "scheduled_at": appt.scheduled_at,
@@ -143,7 +150,6 @@ def get_appointments_for_pdf(
                 }
                 for p in prescriptions
             ],
-            "lab_results": lab_results_data,
             "vitals": [
                 {
                     "systolic_bp": v.systolic_bp,
@@ -163,13 +169,15 @@ def get_appointments_for_pdf(
                 "medication_reminders": discharge.medication_reminders,
             } if discharge else None,
         })
-    return result
+
+    return result, lab_results
 
 
 def render_pdf_template(
     patient: Patient,
     patient_user: User,
     appointments: list[dict],
+    lab_results: list[dict],
     start_date: str | None,
     end_date: str | None,
 ) -> str:
@@ -184,6 +192,7 @@ def render_pdf_template(
 
     watermark_text = f"Green Valley Hospital | {patient_user.full_name} | ID:{patient.patient_id} | {export_dt}"
 
+    # --- Appointment sections ---
     appt_sections_html = ""
     if not appointments:
         appt_sections_html = "<p style='color:#555;font-style:italic;'>No completed visits found for the selected period.</p>"
@@ -203,10 +212,6 @@ def render_pdf_template(
                     rx_html += "</tbody></table>"
                 if rx["instructions"]:
                     rx_html += f"<p><em>Instructions: {rx['instructions']}</em></p>"
-
-            lab_html = ""
-            for lr in appt["lab_results"]:
-                lab_html += f"<p><strong>{lr['test_type']} — {lr['test_subtype'] or ''}</strong>: {lr['result_data']} <em>(finalized {lr['finalized_at'] or ''})</em></p>"
 
             vitals_html = ""
             for v in appt["vitals"]:
@@ -243,11 +248,27 @@ def render_pdf_template(
               {intake_html}
               {("<h4>Visit Notes</h4>" + notes_html) if notes_html else ""}
               {("<h4>Prescriptions</h4>" + rx_html) if rx_html else ""}
-              {("<h4>Lab Results</h4>" + lab_html) if lab_html else ""}
               {("<h4>Vitals</h4>" + vitals_html) if vitals_html else ""}
               {("<h4>Discharge Summary</h4>" + discharge_html) if discharge_html else ""}
             </div>
             """
+
+    # --- Lab Results section (separate, rendered once after all appointment sections) ---
+    lab_section_html = ""
+    if lab_results:
+        lab_rows = ""
+        for lr in lab_results:
+            lab_rows += (
+                f"<p><strong>{lr['test_type']} — {lr['test_subtype'] or ''}</strong>: "
+                f"{lr['result_data']} "
+                f"<em>(finalized {lr['finalized_at'] or ''})</em></p>"
+            )
+        lab_section_html = f"""
+        <div class="visit-section">
+          <h3>Lab Results</h3>
+          {lab_rows}
+        </div>
+        """
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -352,6 +373,9 @@ def render_pdf_template(
   <div style="padding: 0 0 40px 0;">
     {appt_sections_html}
   </div>
+
+  <!-- Lab Results (separate section, appears once after all visits) -->
+  {lab_section_html}
 </body>
 </html>"""
 

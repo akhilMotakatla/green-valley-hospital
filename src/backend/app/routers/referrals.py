@@ -248,24 +248,7 @@ def get_received_referrals(
     current_user: User = Depends(require_role("Doctor")),
 ):
     doctor = _get_doctor_or_403(db, current_user)
-    from sqlalchemy import or_
-    q = (
-        db.query(Referral)
-        .filter(
-            Referral.receiving_department_id == doctor.department_id,
-            or_(
-                Referral.receiving_doctor_id.is_(None),
-                Referral.receiving_doctor_id == doctor.doctor_id,
-            ),
-        )
-        # Urgent first, then by created_at
-        .order_by(
-            Referral.urgency.desc(),  # 'Urgent' > 'Routine' alphabetically; use case expr below
-            Referral.created_at.asc(),
-        )
-    )
-    # Actually sort Urgent first properly using CASE
-    from sqlalchemy import case, text
+    from sqlalchemy import case, or_
     q = (
         db.query(Referral)
         .filter(
@@ -313,10 +296,10 @@ def accept_referral(
             detail="You are not in the receiving department for this referral",
         )
 
-    if referral.status in ("Accepted", "Declined"):
+    if referral.status != "Pending":
         raise HTTPException(
             status_code=409,
-            detail=f"Referral is already {referral.status}",
+            detail="Referral is no longer pending",
         )
 
     referral.status = "Accepted"
@@ -382,10 +365,10 @@ def decline_referral(
             detail="You are not in the receiving department for this referral",
         )
 
-    if referral.status in ("Accepted", "Declined"):
+    if referral.status != "Pending":
         raise HTTPException(
             status_code=409,
-            detail=f"Referral is already {referral.status}",
+            detail="Referral is no longer pending",
         )
 
     referral.status = "Declined"
@@ -438,6 +421,12 @@ def complete_referral(
     referral = db.get(Referral, referral_id)
     if referral is None:
         raise HTTPException(status_code=404, detail="Referral not found")
+
+    if referral.status not in ("Accepted", "AppointmentBooked"):
+        raise HTTPException(
+            status_code=409,
+            detail="Referral cannot be completed from its current status",
+        )
 
     if referral.receiving_doctor_id != doctor.doctor_id:
         raise HTTPException(
