@@ -28,17 +28,24 @@ import { AdminInvoicesPage } from './pages/admin/AdminInvoicesPage';
 import { AdminBlogPage } from './pages/admin/AdminBlogPage';
 import { AdminContactMessagesPage } from './pages/admin/AdminContactMessagesPage';
 import { AdminAuditLogPage } from './pages/admin/AdminAuditLogPage';
+import { AdminConfigPage } from './pages/admin/AdminConfigPage';
+import { AdminSurveysPage } from './pages/admin/AdminSurveysPage';
 
 import { DoctorAppointmentsPage } from './pages/doctor/DoctorAppointmentsPage';
 import { DoctorAvailabilityPage } from './pages/doctor/DoctorAvailabilityPage';
 import { DoctorPatientRecordsPage } from './pages/doctor/DoctorPatientRecordsPage';
 import { DoctorProfilePage } from './pages/doctor/DoctorProfilePage';
+import { DoctorRatingsPage } from './pages/doctor/DoctorRatingsPage';
+import { DoctorDischargeSummaryPage } from './pages/doctor/DoctorDischargeSummaryPage';
 
 import { PatientAppointmentsPage } from './pages/patient/PatientAppointmentsPage';
 import { BookAppointmentPage } from './pages/patient/BookAppointmentPage';
 import { PatientRecordsPage } from './pages/patient/PatientRecordsPage';
 import { PatientInvoicesPage } from './pages/patient/PatientInvoicesPage';
 import { PatientProfilePage } from './pages/patient/PatientProfilePage';
+import { PatientWaitlistPage } from './pages/patient/PatientWaitlistPage';
+import { PatientDischargeSummaryPage } from './pages/patient/PatientDischargeSummaryPage';
+import { PatientSurveysPage } from './pages/patient/PatientSurveysPage';
 
 import { StaffPatientsPage } from './pages/staff/StaffPatientsPage';
 import { StaffPatientDetailPage } from './pages/staff/StaffPatientDetailPage';
@@ -46,6 +53,7 @@ import { RegisterPatientPage } from './pages/staff/RegisterPatientPage';
 import { StaffAppointmentsPage } from './pages/staff/StaffAppointmentsPage';
 import { StaffContactMessagesPage } from './pages/staff/StaffContactMessagesPage';
 import { StaffDirectoryPage } from './pages/staff/StaffDirectoryPage';
+import { StaffWaitlistPage } from './pages/staff/StaffWaitlistPage';
 
 import { LabOrdersPage } from './pages/lab/LabOrdersPage';
 
@@ -94,6 +102,8 @@ function App() {
             <Route path="/admin/blog" element={<AdminBlogPage />} />
             <Route path="/admin/contact-messages" element={<AdminContactMessagesPage />} />
             <Route path="/admin/audit-log" element={<AdminAuditLogPage />} />
+            <Route path="/admin/config" element={<AdminConfigPage />} />
+            <Route path="/admin/surveys" element={<AdminSurveysPage />} />
           </Route>
 
           {/* Doctor */}
@@ -108,6 +118,8 @@ function App() {
             <Route path="/doctor/availability" element={<DoctorAvailabilityPage />} />
             <Route path="/doctor/patients/:patientId" element={<DoctorPatientRecordsPage />} />
             <Route path="/doctor/profile" element={<DoctorProfilePage />} />
+            <Route path="/doctor/ratings" element={<DoctorRatingsPage />} />
+            <Route path="/doctor/appointments/:id/discharge" element={<DoctorDischargeSummaryPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 
@@ -124,6 +136,9 @@ function App() {
             <Route path="/patient/records" element={<PatientRecordsPage />} />
             <Route path="/patient/invoices" element={<PatientInvoicesPage />} />
             <Route path="/patient/profile" element={<PatientProfilePage />} />
+            <Route path="/patient/waitlist" element={<PatientWaitlistPage />} />
+            <Route path="/patient/appointments/:id/discharge" element={<PatientDischargeSummaryPage />} />
+            <Route path="/patient/surveys" element={<PatientSurveysPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 
@@ -141,6 +156,7 @@ function App() {
             <Route path="/staff/appointments" element={<StaffAppointmentsPage />} />
             <Route path="/staff/contact-messages" element={<StaffContactMessagesPage />} />
             <Route path="/staff/directory" element={<StaffDirectoryPage />} />
+            <Route path="/staff/waitlist" element={<StaffWaitlistPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 

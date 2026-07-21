@@ -24,6 +24,7 @@ from app.schemas import (
     VisitNoteCreateRequest,
 )
 from app.services.notification_service import create_notifications, create_survey_for_appointment
+from app.services.waitlist_service import trigger_waitlist_on_cancellation
 from app.utils import dumps, loads, paginate, total_pages, write_audit_log
 
 router = APIRouter(prefix="/doctor", tags=["doctor"], dependencies=[Depends(require_role("Doctor"))])
@@ -163,6 +164,8 @@ def update_appointment_status(
                 "related_entity_id": appointment.appointment_id,
             })
         create_notifications(db, notif_events)
+        # REQ-09: Trigger FIFO waitlist cascade for the freed slot
+        trigger_waitlist_on_cancellation(db, appointment)
     elif payload.status == "Completed":
         # REQ-02: Create satisfaction survey + deferred notification schedule
         create_survey_for_appointment(db, appointment)

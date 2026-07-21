@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarCheck } from 'lucide-react';
-import { listMyAppointments, updateAppointmentStatus } from '../../api/doctor';
+import { listMyAppointments, updateAppointmentStatus, getMyDoctorProfile } from '../../api/doctor';
 import type { DoctorAppointment } from '../../types';
 import { extractErrorMessage } from '../../api/client';
 import { formatDateTime } from '../../utils/format';
@@ -9,6 +9,7 @@ import { StatusBadge } from '../../components/StatusBadge';
 import { Pager } from '../../components/Pager';
 import { SkeletonBlock } from '../../components/SkeletonBlock';
 import { PageError } from '../../components/PageError';
+import { DischargePanel } from '../../components/DischargePanel';
 
 export function DoctorAppointmentsPage() {
   const [items, setItems] = useState<DoctorAppointment[]>([]);
@@ -18,8 +19,15 @@ export function DoctorAppointmentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const pageSize = 10;
-
   const [loading, setLoading] = useState(true);
+
+  // REQ-10: Discharge panel state
+  const [dischargeAppt, setDischargeAppt] = useState<DoctorAppointment | null>(null);
+  const [myDoctorId, setMyDoctorId] = useState<number>(0);
+
+  useEffect(() => {
+    getMyDoctorProfile().then((p) => setMyDoctorId(p.doctor_id)).catch(() => undefined);
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -103,10 +111,24 @@ export function DoctorAppointmentsPage() {
                     </Link>
                     {a.status === 'Scheduled' && (
                       <>
-                        <button className="btn btn-primary btn-sm" disabled={busyId === a.appointment_id} onClick={() => handleStatusChange(a.appointment_id, 'Completed')}>Complete</button>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          disabled={busyId === a.appointment_id}
+                          onClick={() => setDischargeAppt(a)}
+                        >
+                          Complete &amp; Discharge
+                        </button>
                         <button className="btn btn-outline btn-sm" disabled={busyId === a.appointment_id} onClick={() => handleStatusChange(a.appointment_id, 'NoShow')}>No-show</button>
                         <button className="btn btn-danger btn-sm" disabled={busyId === a.appointment_id} onClick={() => handleStatusChange(a.appointment_id, 'Cancelled')}>Cancel</button>
                       </>
+                    )}
+                    {a.status === 'Completed' && (
+                      <Link
+                        className="btn btn-outline btn-sm"
+                        to={`/doctor/appointments/${a.appointment_id}/discharge`}
+                      >
+                        View Discharge
+                      </Link>
                     )}
                   </td>
                 </tr>
@@ -115,6 +137,19 @@ export function DoctorAppointmentsPage() {
           </table>
           <Pager page={page} pageSize={pageSize} total={total} onPageChange={setPage} />
         </>
+      )}
+
+      {/* REQ-10: Discharge panel shown when doctor clicks "Complete & Discharge" */}
+      {dischargeAppt && (
+        <DischargePanel
+          appointmentId={dischargeAppt.appointment_id}
+          doctorId={myDoctorId}
+          onClose={() => setDischargeAppt(null)}
+          onSuccess={() => {
+            setDischargeAppt(null);
+            load();
+          }}
+        />
       )}
     </div>
   );
