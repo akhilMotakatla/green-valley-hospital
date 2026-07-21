@@ -2423,3 +2423,189 @@ tr:last-child td {
   .cinematic-hero-float-card { transition: none !important; opacity: 1 !important; transform: none !important; animation: none !important; }
   .cinematic-hero-scroll-cue { animation: none !important; }
 }
+
+/* ============================================================
+   REQ-01: SlotPicker component
+   ============================================================ */
+.slot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.5rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-primary-dark);
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: var(--font-mono, monospace);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, transform 100ms ease;
+  user-select: none;
+}
+.slot-btn:hover {
+  background: var(--color-primary-light);
+}
+.slot-btn--selected {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary-dark);
+  box-shadow: 0 2px 6px rgba(0,116,197,0.25);
+  transform: translateY(-1px);
+}
+
+/* ============================================================
+   REQ-01: AvailabilityWeekGrid component
+   ============================================================ */
+.availability-grid {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.availability-config-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg-alt, #f8f9fa);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.875rem;
+  flex-wrap: wrap;
+}
+.availability-config-label {
+  font-weight: 500;
+  color: var(--color-text);
+}
+.availability-config-row select {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.875rem;
+  min-width: 90px;
+}
+
+.availability-days {
+  display: flex;
+  flex-direction: column;
+}
+
+.availability-day-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+.availability-day-row:last-child {
+  border-bottom: none;
+}
+
+.availability-day-label {
+  width: 90px;
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding-top: 0.35rem;
+  color: var(--color-text);
+}
+
+.availability-day-content {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.availability-off-badge {
+  font-size: 0.8125rem;
+  color: var(--color-text-light);
+  font-style: italic;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-alt, #f0f0f0);
+}
+
+.availability-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.availability-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-light);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.availability-chip--inactive {
+  border-color: var(--color-border);
+  background: var(--color-bg-alt, #f0f0f0);
+  color: var(--color-text-light);
+  opacity: 0.7;
+}
+.chip-time {
+  font-family: var(--font-mono, monospace);
+}
+.chip-inactive-label {
+  font-size: 0.7rem;
+  background: var(--color-text-light);
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.chip-actions {
+  display: flex;
+  gap: 0.2rem;
+}
+.chip-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.25rem;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--color-text-light);
+  transition: background 120ms;
+}
+.chip-btn:hover {
+  background: rgba(0,0,0,0.08);
+  color: var(--color-text);
+}
+.chip-btn--danger:hover {
+  background: rgba(220,38,38,0.1);
+  color: var(--color-danger);
+}
+
+.availability-add-btn {
+  white-space: nowrap;
+}
+
+.availability-add-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.375rem 0;
+}
+.availability-add-form input[type="time"] {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.875rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  width: 110px;
+}
+.time-sep {
+  font-size: 0.875rem;
+  color: var(--color-text-light);
+}

@@ -1,13 +1,15 @@
+/**
+ * REQ-01 updated: uses /doctors/{id}/available-slots (schedule-aware) instead
+ * of the old fixed 09:00-17:00 availability endpoint, and renders slot selection
+ * via the shared SlotPicker component.
+ */
 import { useEffect, useState } from 'react';
 import { getDepartments } from '../../api/public';
-import {
-  bookAppointment,
-  getDoctorAvailability,
-  searchDoctors,
-  type PatientVisibleDoctor,
-} from '../../api/patient';
+import { bookAppointment, searchDoctors, type PatientVisibleDoctor } from '../../api/patient';
+import { getAvailableSlots } from '../../api/availability';
 import type { Department } from '../../types';
 import { extractErrorMessage } from '../../api/client';
+import { SlotPicker } from '../../components/SlotPicker';
 
 export function BookAppointmentPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -16,6 +18,7 @@ export function BookAppointmentPage() {
   const [doctorId, setDoctorId] = useState<string>('');
   const [date, setDate] = useState('');
   const [slots, setSlots] = useState<string[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -32,14 +35,22 @@ export function BookAppointmentPage() {
       .catch((e) => setError(extractErrorMessage(e)));
   }, [departmentId]);
 
+  // REQ-01: fetch schedule-aware available slots whenever doctor or date changes
   useEffect(() => {
     setSlots([]);
     setSelectedSlot('');
-    if (doctorId && date) {
-      getDoctorAvailability(Number(doctorId), date)
-        .then((r) => setSlots(r.available_slots))
-        .catch((e) => setError(extractErrorMessage(e)));
-    }
+    if (!doctorId || !date) return;
+
+    setSlotsLoading(true);
+    getAvailableSlots(Number(doctorId), date)
+      .then((r) => {
+        setSlots(r.slots);
+        setSlotsLoading(false);
+      })
+      .catch((e) => {
+        setError(extractErrorMessage(e));
+        setSlotsLoading(false);
+      });
   }, [doctorId, date]);
 
   async function handleBook() {
@@ -52,7 +63,11 @@ export function BookAppointmentPage() {
     setSubmitting(true);
     try {
       const scheduledAt = `${date}T${selectedSlot}:00`;
-      await bookAppointment({ doctor_id: Number(doctorId), scheduled_at: scheduledAt, reason: reason || undefined });
+      await bookAppointment({
+        doctor_id: Number(doctorId),
+        scheduled_at: scheduledAt,
+        reason: reason || undefined,
+      });
       setSuccess('Appointment booked successfully.');
       setSelectedSlot('');
       setSlots([]);
@@ -81,9 +96,17 @@ export function BookAppointmentPage() {
             ))}
           </select>
         </label>
+
         <label>
           Doctor
-          <select value={doctorId} onChange={(e) => setDoctorId(e.target.value)}>
+          <select
+            value={doctorId}
+            onChange={(e) => {
+              setDoctorId(e.target.value);
+              setSlots([]);
+              setSelectedSlot('');
+            }}
+          >
             <option value="">Select a doctor</option>
             {doctors.map((d) => (
               <option key={d.doctor_id} value={d.doctor_id}>
@@ -92,31 +115,45 @@ export function BookAppointmentPage() {
             ))}
           </select>
         </label>
+
         <label>
           Date
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => {
+              setDate(e.target.value);
+              setSelectedSlot('');
+            }}
+          />
         </label>
-        {slots.length > 0 && (
-          <label>
-            Available time slots
-            <select value={selectedSlot} onChange={(e) => setSelectedSlot(e.target.value)}>
-              <option value="">Select a time</option>
-              {slots.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </label>
+
+        {/* REQ-01: slot picker replaces free-form time input */}
+        {(doctorId && date) && (
+          <div>
+            <span style={{ fontSize: '0.9rem', fontWeight: 500, display: 'block', marginBottom: '0.4rem' }}>
+              Available time slots
+            </span>
+            <SlotPicker
+              slots={slots}
+              selected={selectedSlot}
+              onSelect={setSelectedSlot}
+              loading={slotsLoading}
+              ready={!slotsLoading}
+            />
+          </div>
         )}
-        {doctorId && date && slots.length === 0 && (
-          <p className="muted">No available slots for this date.</p>
-        )}
+
         <label>
           Reason (optional)
           <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
         </label>
-        <button className="btn btn-primary" onClick={handleBook} disabled={submitting}>
+
+        <button
+          className="btn btn-primary"
+          onClick={handleBook}
+          disabled={submitting || !selectedSlot}
+        >
           {submitting ? 'Booking…' : 'Book Appointment'}
         </button>
       </div>
