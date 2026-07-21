@@ -607,16 +607,18 @@ Inter-department referrals. Doctor creates, receiving-dept doctor accepts/declin
 
 ## 16. Analytics (REQ-06)
 
-Admin-only aggregate analytics with optional CSV export. Default date range: today − 365 days through today when params absent.
+Admin-only aggregate analytics with CSV export via a dedicated export endpoint. Default date range: today − 30 days through today when params absent.
 
 | Method | Path | Auth | Request | Response |
 |---|---|---|---|---|
-| GET | `/api/admin/analytics/appointments` | Admin | query: `start=YYYY-MM-DD`, `end=YYYY-MM-DD`, `format?=csv` | `200 application/json` `{"items": [{"month": "2026-01", "total": 42, "completed": 30, "cancelled": 8, "noshow": 4, "scheduled": 0, "noshow_rate": 9.52}], "start": "...", "end": "..."}` OR `200 text/csv`. `400` if end < start. |
-| GET | `/api/admin/analytics/revenue` | Admin | query: `start`, `end`, `format?=csv` | `200` `{"items": [{"month": "2026-01", "invoiced_cents": 500000, "collected_cents": 320000}]}`. Uses `invoices.created_at` for invoiced; `invoices.paid_at` for collected (OI-7). |
-| GET | `/api/admin/analytics/departments` | Admin | query: `start`, `end`, `format?=csv` | `200` `{"items": [{"department_id": 1, "department_name": "Cardiology", "appointment_count": 95}]}` sorted desc. |
-| GET | `/api/admin/analytics/patient-acquisition` | Admin | query: `start`, `end`, `format?=csv` | `200` `{"items": [{"month": "2026-01", "new_patients": 12}]}` grouped by `users.created_at` month for `role='Patient'`. |
+| GET | `/api/admin/analytics/appointments` | Admin | query: `from_date=YYYY-MM-DD`, `to_date=YYYY-MM-DD`, `granularity=day\|week\|month` (default: month) | `200` `{"series": [{"period": "2026-01", "count": 42, "completed": 30, "cancelled": 8, "no_show": 4, "scheduled": 0}], "total": 42}`. `400` if `to_date` < `from_date` or granularity invalid. |
+| GET | `/api/admin/analytics/no-show-rate` | Admin | query: `from_date`, `to_date`, `granularity` | `200` `{"series": [{"period": "2026-01", "total": 42, "cancelled": 8, "eligible": 34, "no_shows": 4, "rate": 0.1176}], "overall_rate": 0.1176}`. Rate denominator excludes Cancelled (`eligible = total − cancelled`). |
+| GET | `/api/admin/analytics/revenue` | Admin | query: `from_date`, `to_date` | `200` `{"series": [{"month": "2026-01", "invoiced": 5000.00, "collected": 3200.00, "outstanding": 1800.00}], "total_invoiced": 5000.00, "total_collected": 3200.00, "total_outstanding": 1800.00}`. Dollar values (not cents). Uses `invoices.created_at` for invoiced; `invoices.paid_at` (with `created_at` fallback when `paid_at IS NULL`) for collected (OI-7). |
+| GET | `/api/admin/analytics/department-volume` | Admin | query: `from_date`, `to_date` | `200` `{"departments": [{"department_id": 1, "name": "Cardiology", "count": 95}]}` sorted desc by count. |
+| GET | `/api/admin/analytics/patient-acquisition` | Admin | query: `from_date`, `to_date` | `200` `{"series": [{"month": "2026-01", "new_patients": 12}], "total_new": 12}` grouped by `users.created_at` month for `role='Patient'`. |
+| GET | `/api/admin/analytics/export-csv` | Admin | query: `metric=appointments\|no_show_rate\|revenue\|department_volume\|patient_acquisition`, `from_date`, `to_date`, `granularity` (optional, for metrics that support it) | `200 text/csv` `Content-Disposition: attachment; filename="analytics_{metric}_{from_date}_{to_date}.csv"`. Body: header row + data rows matching the JSON field names for the requested metric. `400` if metric is not a valid value. |
 
-**CSV**: `Content-Type: text/csv`, `Content-Disposition: attachment; filename="gvh_analytics_{metric}_{start}_{end}.csv"`. Body: header row matching JSON field names.
+**CSV export**: CSV export is handled exclusively by `GET /api/admin/analytics/export-csv?metric=...&from_date=...&to_date=...`. The `?format=csv` query parameter is not supported on the individual metric endpoints. Each row in the CSV matches the field names in the corresponding JSON response.
 
 ---
 

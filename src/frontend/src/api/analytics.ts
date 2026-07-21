@@ -23,6 +23,10 @@ export type AnalyticsMetric =
 export interface AppointmentPeriod {
   period: string;
   count: number;
+  completed: number;
+  cancelled: number;
+  no_show: number;
+  scheduled: number;
 }
 
 export interface AppointmentAnalytics {
@@ -33,6 +37,8 @@ export interface AppointmentAnalytics {
 export interface NoShowPeriod {
   period: string;
   total: number;
+  cancelled: number;
+  eligible: number; // total - cancelled; denominator for rate
   no_shows: number;
   rate: number; // 0.0–1.0 fraction; multiply by 100 for percent display
 }

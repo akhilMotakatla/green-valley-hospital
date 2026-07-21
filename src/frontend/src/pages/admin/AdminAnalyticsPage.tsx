@@ -426,7 +426,11 @@ export function AdminAnalyticsPage() {
                 <XAxis dataKey="period" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip />
-                <Bar dataKey="count" fill="#4F86C6" name="Appointments" radius={[3, 3, 0, 0]} />
+                <Legend />
+                <Bar dataKey="completed" stackId="appt" fill="#22c55e" name="Completed" />
+                <Bar dataKey="cancelled" stackId="appt" fill="#ef4444" name="Cancelled" />
+                <Bar dataKey="no_show"   stackId="appt" fill="#f97316" name="No-Show" />
+                <Bar dataKey="scheduled" stackId="appt" fill="#3b82f6" name="Scheduled" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
             {apptData.series.length < 3 && FEW_DATA_NOTE}

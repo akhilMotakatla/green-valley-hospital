@@ -80,9 +80,9 @@ def get_appointment_analytics(
     current_user: User = _admin,
     db: Session = Depends(get_db),
 ):
-    """Appointment volume (COUNT) grouped by period.
+    """Appointment volume (COUNT) grouped by period with per-status breakdown.
 
-    Returns: {series: [{period, count}], total}
+    Returns: {series: [{period, count, completed, cancelled, no_show, scheduled}], total}
     """
     from_date, to_date = _resolve_dates(from_date, to_date)
     if granularity not in ("day", "week", "month"):
@@ -97,7 +97,11 @@ def get_appointment_analytics(
         text("""
             SELECT
                 strftime(:fmt, scheduled_at) AS period,
-                COUNT(*) AS cnt
+                COUNT(*) AS cnt,
+                SUM(CASE WHEN status = 'Completed'  THEN 1 ELSE 0 END) AS completed,
+                SUM(CASE WHEN status = 'Cancelled'  THEN 1 ELSE 0 END) AS cancelled,
+                SUM(CASE WHEN status = 'NoShow'     THEN 1 ELSE 0 END) AS no_show,
+                SUM(CASE WHEN status = 'Scheduled'  THEN 1 ELSE 0 END) AS scheduled
             FROM appointments
             WHERE date(scheduled_at) BETWEEN :fd AND :td
             GROUP BY period
@@ -106,7 +110,17 @@ def get_appointment_analytics(
         {"fmt": fmt, "fd": from_date, "td": to_date},
     ).fetchall()
 
-    series = [{"period": r[0], "count": r[1]} for r in rows]
+    series = [
+        {
+            "period":    r[0],
+            "count":     r[1],
+            "completed": r[2],
+            "cancelled": r[3],
+            "no_show":   r[4],
+            "scheduled": r[5],
+        }
+        for r in rows
+    ]
     total = sum(r["count"] for r in series)
 
     return {"series": series, "total": total}
@@ -124,10 +138,11 @@ def get_no_show_rate(
     current_user: User = _admin,
     db: Session = Depends(get_db),
 ):
-    """No-show rate by period.
+    """No-show rate by period, excluding Cancelled appointments from the denominator.
 
-    Returns: {series: [{period, total, no_shows, rate}], overall_rate}
-    rate = no_shows / total, rounded to 4 decimal places (0.0 when total is 0).
+    Returns: {series: [{period, total, cancelled, eligible, no_shows, rate}], overall_rate}
+    eligible = total - cancelled
+    rate = no_shows / eligible, rounded to 4 decimal places (0.0 when eligible is 0).
     """
     from_date, to_date = _resolve_dates(from_date, to_date)
     if granularity not in ("day", "week", "month"):
@@ -143,7 +158,8 @@ def get_no_show_rate(
             SELECT
                 strftime(:fmt, scheduled_at) AS period,
                 COUNT(*) AS total,
-                SUM(CASE WHEN status = 'NoShow' THEN 1 ELSE 0 END) AS no_shows
+                SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled,
+                SUM(CASE WHEN status = 'NoShow'    THEN 1 ELSE 0 END) AS no_shows
             FROM appointments
             WHERE date(scheduled_at) BETWEEN :fd AND :td
             GROUP BY period
@@ -153,20 +169,29 @@ def get_no_show_rate(
     ).fetchall()
 
     series = []
-    grand_total = 0
+    grand_eligible = 0
     grand_no_shows = 0
 
     for r in rows:
-        total_val = r[1]
-        no_shows_val = r[2]
-        rate = round(no_shows_val / total_val, 4) if total_val > 0 else 0.0
+        total_val    = r[1]
+        cancelled    = r[2]
+        no_shows_val = r[3]
+        eligible     = total_val - cancelled
+        rate = round(no_shows_val / eligible, 4) if eligible > 0 else 0.0
         series.append(
-            {"period": r[0], "total": total_val, "no_shows": no_shows_val, "rate": rate}
+            {
+                "period":   r[0],
+                "total":    total_val,
+                "cancelled": cancelled,
+                "eligible": eligible,
+                "no_shows": no_shows_val,
+                "rate":     rate,
+            }
         )
-        grand_total += total_val
-        grand_no_shows += no_shows_val
+        grand_eligible  += eligible
+        grand_no_shows  += no_shows_val
 
-    overall_rate = round(grand_no_shows / grand_total, 4) if grand_total > 0 else 0.0
+    overall_rate = round(grand_no_shows / grand_eligible, 4) if grand_eligible > 0 else 0.0
 
     return {"series": series, "overall_rate": overall_rate}
 
@@ -401,15 +426,21 @@ def export_csv(
         fmt = _granularity_fmt(granularity)
         rows = db.execute(
             text("""
-                SELECT strftime(:fmt, scheduled_at) AS period, COUNT(*) AS cnt
+                SELECT
+                    strftime(:fmt, scheduled_at) AS period,
+                    COUNT(*) AS cnt,
+                    SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+                    SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled,
+                    SUM(CASE WHEN status = 'NoShow'    THEN 1 ELSE 0 END) AS no_show,
+                    SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) AS scheduled
                 FROM appointments
                 WHERE date(scheduled_at) BETWEEN :fd AND :td
                 GROUP BY period ORDER BY period ASC
             """),
             {"fmt": fmt, "fd": from_date, "td": to_date},
         ).fetchall()
-        headers = ["period", "count"]
-        csv_rows = [[r[0], r[1]] for r in rows]
+        headers = ["period", "count", "completed", "cancelled", "no_show", "scheduled"]
+        csv_rows = [[r[0], r[1], r[2], r[3], r[4], r[5]] for r in rows]
 
     elif metric == "no_show_rate":
         fmt = _granularity_fmt(granularity)
@@ -418,18 +449,21 @@ def export_csv(
                 SELECT
                     strftime(:fmt, scheduled_at) AS period,
                     COUNT(*) AS total,
-                    SUM(CASE WHEN status = 'NoShow' THEN 1 ELSE 0 END) AS no_shows
+                    SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled,
+                    SUM(CASE WHEN status = 'NoShow'    THEN 1 ELSE 0 END) AS no_shows
                 FROM appointments
                 WHERE date(scheduled_at) BETWEEN :fd AND :td
                 GROUP BY period ORDER BY period ASC
             """),
             {"fmt": fmt, "fd": from_date, "td": to_date},
         ).fetchall()
-        headers = ["period", "total", "no_shows", "rate"]
-        csv_rows = [
-            [r[0], r[1], r[2], round(r[2] / r[1], 4) if r[1] > 0 else 0.0]
-            for r in rows
-        ]
+        headers = ["period", "total", "cancelled", "eligible", "no_shows", "rate"]
+        csv_rows = []
+        for r in rows:
+            total_val, cancelled, no_shows = r[1], r[2], r[3]
+            eligible = total_val - cancelled
+            rate = round(no_shows / eligible, 4) if eligible > 0 else 0.0
+            csv_rows.append([r[0], total_val, cancelled, eligible, no_shows, rate])
 
     elif metric == "revenue":
         inv_rows = db.execute(

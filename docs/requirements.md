@@ -2093,22 +2093,23 @@ Actually, on reflection, the clinical reason is created by a Doctor and read by 
 #### Functional Requirements
 
 - ANLYFR-1: All aggregation is performed server-side via SQL aggregate queries. The frontend receives pre-aggregated data (e.g., `[{ month: "2026-05", total: 142, completed: 98, cancelled: 30, noshow: 14 }, ...]`) and renders it as charts. The frontend must not perform SUM, AVG, COUNT, or GROUP operations on raw data arrays.
-- ANLYFR-2: The analytics API exposes separate endpoints per metric group to allow independent loading and export:
-  - `GET /admin/analytics/appointments?start=YYYY-MM-DD&end=YYYY-MM-DD`
-  - `GET /admin/analytics/revenue?start=YYYY-MM-DD&end=YYYY-MM-DD`
-  - `GET /admin/analytics/departments?start=YYYY-MM-DD&end=YYYY-MM-DD`
-  - `GET /admin/analytics/patient-acquisition?start=YYYY-MM-DD&end=YYYY-MM-DD`
-- ANLYFR-3: CSV export is triggered by adding `?format=csv` to any analytics endpoint. The backend returns a `Content-Type: text/csv` response with `Content-Disposition: attachment; filename="...csv"`. No separate export endpoint is needed.
-- ANLYFR-4: Date range validation: `start` must be before `end`. If not, return 400 Bad Request. If `start` or `end` is missing, the default range is last 12 months from today.
+- ANLYFR-2: The analytics API exposes separate endpoints per metric group to allow independent loading, using `from_date`/`to_date` query params (not `start`/`end`):
+  - `GET /admin/analytics/appointments?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD&granularity=month`
+  - `GET /admin/analytics/no-show-rate?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD&granularity=month`
+  - `GET /admin/analytics/revenue?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD`
+  - `GET /admin/analytics/department-volume?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD`
+  - `GET /admin/analytics/patient-acquisition?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD`
+- ANLYFR-3: CSV export is handled by a dedicated endpoint: `GET /api/admin/analytics/export-csv?metric=<name>&from_date=YYYY-MM-DD&to_date=YYYY-MM-DD`. Valid metric values: `appointments`, `no_show_rate`, `revenue`, `department_volume`, `patient_acquisition`. The backend returns `Content-Type: text/csv` with `Content-Disposition: attachment; filename="analytics_{metric}_{from_date}_{to_date}.csv"`. The `?format=csv` query parameter on individual metric endpoints is not supported.
+- ANLYFR-4: Date range validation: `from_date` must be before or equal to `to_date`. If not, return 400 Bad Request. If `from_date` or `to_date` is missing, the default range is the last 30 days from today.
 - ANLYFR-5: Revenue chart uses `invoices.created_at` for the "invoiced" series and (for the "collected" series) `invoices.created_at` where `status='Paid'` — both series grouped by the month of `created_at`. This is an approximation (it attributes payment to creation month, not the actual date status changed to Paid). This is a known simplification; a precise approach would require storing `paid_at` — this is an open item for Sagar (OI-7 in Section 9.18).
 - ANLYFR-6: The chart type (bar, line) and library are Sagar's decision in Phase 3/4, subject to VITNFR-1's constraint (React 19-compatible, standard library).
 
 #### Acceptance Criteria
 
-- AC-ANLY-1: Given an Admin calls `GET /admin/analytics/appointments?start=2026-01-01&end=2026-06-30`, then the response contains an array of monthly objects covering Jan–Jun 2026, each with total/completed/cancelled/noshow counts derived from `appointments.scheduled_at`. No calculation is done client-side.
+- AC-ANLY-1: Given an Admin calls `GET /admin/analytics/appointments?from_date=2026-01-01&to_date=2026-06-30`, then the response contains `{"series": [...], "total": N}` where each series item covers one period with `count`, `completed`, `cancelled`, `no_show`, and `scheduled` fields derived from `appointments.scheduled_at`. No calculation is done client-side.
 - AC-ANLY-2: Given a non-Admin user (Doctor, Patient, Staff, Lab, BillingSpecialist) calls any analytics endpoint, then the response is 403 Forbidden.
-- AC-ANLY-3: Given an Admin calls `GET /admin/analytics/departments?start=2026-01-01&end=2026-12-31&format=csv`, then the response has Content-Type: text/csv and the body is a valid CSV with department name and appointment count columns.
-- AC-ANLY-4: Given `start=2026-06-01&end=2026-01-01` (end before start), then the response is 400 Bad Request.
+- AC-ANLY-3: Given an Admin calls `GET /api/admin/analytics/export-csv?metric=department_volume&from_date=2026-01-01&to_date=2026-12-31`, then the response has Content-Type: text/csv and the body is a valid CSV with `department_id`, `name`, and `count` columns.
+- AC-ANLY-4: Given `from_date=2026-06-01&to_date=2026-01-01` (to_date before from_date), then the response is 400 Bad Request.
 
 #### Priority: High
 
