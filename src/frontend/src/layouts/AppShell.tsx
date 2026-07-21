@@ -16,6 +16,9 @@ import {
   Bell,
   CalendarPlus,
   CalendarClock,
+  Clock,
+  Settings,
+  Star,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { Logo } from '../components/Logo';
@@ -37,18 +40,23 @@ const navByRole: Record<string, NavItem[]> = {
     { to: '/admin/blog',              label: 'Blog',             icon: <BookOpen size={16} /> },
     { to: '/admin/contact-messages',  label: 'Contact Messages', icon: <MessageSquare size={16} /> },
     { to: '/admin/audit-log',         label: 'Audit Log',        icon: <ClipboardList size={16} /> },
+    { to: '/admin/surveys',           label: 'Surveys',          icon: <Star size={16} /> },
+    { to: '/admin/config',            label: 'Configuration',    icon: <Settings size={16} /> },
   ],
   Doctor: [
     { to: '/doctor',              label: 'Appointments', icon: <CalendarCheck size={16} /> },
     { to: '/doctor/availability', label: 'Schedule',     icon: <CalendarClock size={16} /> },
     { to: '/doctor/profile',      label: 'My Profile',   icon: <UserCircle size={16} /> },
+    { to: '/doctor/ratings',      label: 'My Ratings',   icon: <Star size={16} /> },
   ],
   Patient: [
     { to: '/patient',          label: 'My Appointments', icon: <CalendarCheck size={16} /> },
     { to: '/patient/book',     label: 'Book Appointment', icon: <CalendarPlus size={16} /> },
     { to: '/patient/records',  label: 'My Records',       icon: <FileText size={16} /> },
     { to: '/patient/invoices', label: 'My Billing',       icon: <Receipt size={16} /> },
-    { to: '/patient/profile',  label: 'My Profile',       icon: <UserCircle size={16} /> },
+    { to: '/patient/profile',   label: 'My Profile',       icon: <UserCircle size={16} /> },
+    { to: '/patient/waitlist',  label: 'Waitlist',         icon: <Clock size={16} /> },
+    { to: '/patient/surveys',   label: 'My Surveys',       icon: <Star size={16} /> },
   ],
   Staff: [
     { to: '/staff',                   label: 'Patients',         icon: <Users size={16} /> },
@@ -56,6 +64,7 @@ const navByRole: Record<string, NavItem[]> = {
     { to: '/staff/appointments',      label: 'Appointments',     icon: <CalendarCheck size={16} /> },
     { to: '/staff/contact-messages',  label: 'Contact Messages', icon: <MessageSquare size={16} /> },
     { to: '/staff/directory',         label: 'Doctor Directory', icon: <Users size={16} /> },
+    { to: '/staff/waitlist',          label: 'Waitlist',         icon: <Clock size={16} /> },
   ],
   Lab: [
     { to: '/lab', label: 'Order Queue', icon: <FlaskConical size={16} /> },
