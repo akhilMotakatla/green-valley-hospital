@@ -121,9 +121,10 @@ def create_discharge_summary(
         raise HTTPException(status_code=404, detail="Appointment not found")
     if appointment.doctor_id != doctor.doctor_id:
         raise HTTPException(status_code=403, detail="Not your appointment")
-    if appointment.status != "Completed":
+    if appointment.status != "Scheduled":
         raise HTTPException(
-            status_code=400, detail="Discharge summary can only be created for Completed appointments"
+            status_code=400,
+            detail="Discharge summary can only be created for Scheduled appointments",
         )
 
     # Idempotency guard
@@ -178,6 +179,9 @@ def create_discharge_summary(
             raise HTTPException(
                 status_code=409, detail="Follow-up slot is no longer available."
             )
+
+    # Mark appointment Completed atomically with the discharge row (OI-8)
+    appointment.status = "Completed"
 
     # Create the discharge summary
     summary = DischargeSummary(

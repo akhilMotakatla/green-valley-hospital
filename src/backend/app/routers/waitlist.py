@@ -239,9 +239,39 @@ def confirm_waitlist_slot(
     # Build the scheduled_at datetime from preferred_date + held_slot_time
     scheduled_at = f"{entry.preferred_date}T{entry.held_slot_time}:00"
 
-    # Check the slot is still free (race-condition guard)
-    available = get_available_slots(db, entry.doctor_id, entry.preferred_date)
-    if entry.held_slot_time not in available:
+    # Race-condition guard: two direct DB checks instead of get_available_slots()
+    # (get_available_slots excludes Notified-held slots, including this patient's own,
+    # so it would always report the slot missing and wrongly return 409.)
+
+    # 1. Any real appointment (Scheduled or Completed) already occupies this slot?
+    slot_booked = (
+        db.query(Appointment)
+        .filter(
+            Appointment.doctor_id == entry.doctor_id,
+            Appointment.scheduled_at == scheduled_at,
+            Appointment.status.in_(["Scheduled", "Completed"]),
+        )
+        .first()
+    )
+    if slot_booked:
+        raise HTTPException(
+            status_code=409,
+            detail="Slot is no longer available. Please rejoin the waitlist.",
+        )
+
+    # 2. Another Notified waitlist entry holds the same slot?
+    other_hold = (
+        db.query(WaitlistEntry)
+        .filter(
+            WaitlistEntry.entry_id != entry_id,
+            WaitlistEntry.doctor_id == entry.doctor_id,
+            WaitlistEntry.preferred_date == entry.preferred_date,
+            WaitlistEntry.held_slot_time == entry.held_slot_time,
+            WaitlistEntry.status == "Notified",
+        )
+        .first()
+    )
+    if other_hold:
         raise HTTPException(
             status_code=409,
             detail="Slot is no longer available. Please rejoin the waitlist.",
