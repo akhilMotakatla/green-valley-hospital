@@ -504,4 +504,207 @@ Every list endpoint in Section 9 returns the standard five-field envelope:
 | Section 8.2.2 (pagination) | All 13 list endpoints; see Conventions | No schema change |
 | Section 8.2.4 (JWT claims) | `POST /api/auth/login` (token minting) | No schema change |
 | Section 8.4.2 (has_insurance_claim) | All invoice endpoints | `invoices.has_insurance_claim` |
+
+---
+
+## 10. Batch 2 (2026-07-20): REQ-01 through REQ-12
+
+Status: Sections 11–22 added below.
+Source: `docs/technical-design.md` §4.2 (authoritative design source — this section is the published contract copy).
+Companion schema: `db/schema.sql` Batch 2 block (16 new tables + `invoices.paid_at`).
+
+All Batch 2 endpoints follow the same conventions as Sections 1–9: `/api` base path, `snake_case` JSON, `Authorization: Bearer <jwt>` on all non-public endpoints, standard error shape `{"detail": "..."}`, pagination envelope `{"items", "total", "page", "page_size", "total_pages"}`.
+
+---
+
+## 11. Availability (REQ-01)
+
+Doctor availability schedule management (doctor-scoped and admin-scoped). Slot query (public to Patient/Staff/Doctor/Admin roles).
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| GET | `/api/doctors/{doctor_id}/available-slots` | Patient / Staff / Doctor / Admin | query: `date=YYYY-MM-DD` (required) | `200` `{"doctor_id": N, "date": "YYYY-MM-DD", "slot_duration_minutes": 30, "slots": ["09:00", "09:30", ...]}` — empty slots array if no availability. `400` if date missing or invalid format. |
+| GET | `/api/doctor/availability/schedule` | Doctor | — | `200` `{"items": [{schedule_id, day_of_week, start_time, end_time, is_active}]}` |
+| POST | `/api/doctor/availability/schedule` | Doctor | `{day_of_week: 0-6, start_time: "HH:MM", end_time: "HH:MM"}` | `201` `{schedule_id, doctor_id, day_of_week, start_time, end_time, is_active}`. `400` if start >= end or invalid values. `409` if window overlaps an existing window for same day. |
+| PUT | `/api/doctor/availability/schedule/{schedule_id}` | Doctor | `{start_time?, end_time?, is_active?}` | `200` updated schedule row. `403` if schedule_id doesn't belong to calling doctor. |
+| DELETE | `/api/doctor/availability/schedule/{schedule_id}` | Doctor | — | `204`. `403` ownership check. |
+| GET | `/api/doctor/availability/config` | Doctor | — | `200` `{config_id, doctor_id, slot_duration_minutes, updated_at}` — returns default if no config row exists yet. |
+| PUT | `/api/doctor/availability/config` | Doctor | `{slot_duration_minutes: 10\|15\|20\|30\|45\|60}` | `200` `{config_id, doctor_id, slot_duration_minutes, updated_at}`. `400` if value not in allowed set. |
+| GET | `/api/doctor/availability/blocks` | Doctor | query: `from_date?=YYYY-MM-DD`, `to_date?=YYYY-MM-DD` | `200` `{"items": [{block_id, block_date, start_time, end_time, reason, created_at}]}` |
+| POST | `/api/doctor/availability/blocks` | Doctor | `{block_date: "YYYY-MM-DD", start_time?: "HH:MM", end_time?: "HH:MM", reason?: "..."}` | `201` block row. `400` if only one of start_time/end_time provided. |
+| DELETE | `/api/doctor/availability/blocks/{block_id}` | Doctor | — | `204`. `403` ownership check. |
+| GET | `/api/admin/doctors/{doctor_id}/availability/schedule` | Admin | — | `200` same shape as doctor's own GET |
+| POST | `/api/admin/doctors/{doctor_id}/availability/schedule` | Admin | same as doctor's POST | `201` schedule row |
+| PUT | `/api/admin/doctors/{doctor_id}/availability/schedule/{schedule_id}` | Admin | same as doctor's PUT | `200` updated |
+| DELETE | `/api/admin/doctors/{doctor_id}/availability/schedule/{schedule_id}` | Admin | — | `204` |
+| GET | `/api/admin/doctors/{doctor_id}/availability/config` | Admin | — | `200` config row |
+| PUT | `/api/admin/doctors/{doctor_id}/availability/config` | Admin | same as doctor's PUT | `200` updated |
+| GET | `/api/admin/doctors/{doctor_id}/availability/blocks` | Admin | query: `from_date?`, `to_date?` | `200` blocks list |
+| POST | `/api/admin/doctors/{doctor_id}/availability/blocks` | Admin | same as doctor's POST | `201` block row |
+| DELETE | `/api/admin/doctors/{doctor_id}/availability/blocks/{block_id}` | Admin | — | `204` |
+
+**Slot-query algorithm**: Implemented as a pure function `get_available_slots(db, doctor_id, date_str)` in `src/backend/app/services/availability.py`. Generates all candidate time slots from the doctor's weekly schedule for the requested day-of-week, then removes: (1) slots covered by a one-off `doctor_availability_blocks` row (full-day block clears all; time-range block removes overlapping slots); (2) slots already booked (`appointments.status IN ('Scheduled','Completed')`); (3) slots held by a `waitlist_entries` row where `status='Notified'` and `held_slot_time` matches the slot time.
+
+---
+
+## 12. Notifications (REQ-02)
+
+In-app notification center. All authenticated roles. `unread-count` must respond < 200ms (NOTIFNFR-1) using `idx_notifications_recipient_read`.
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| GET | `/api/notifications/unread-count` | Any authenticated | — | `200` `{"unread_count": N}` |
+| GET | `/api/notifications` | Any authenticated | query: `page`, `page_size` | `200` `{"items": [{notification_id, event_type, title, body, related_entity_type, related_entity_id, is_read, created_at}], total, page, page_size, total_pages}` filtered to `recipient_user_id = current_user.id` |
+| PATCH | `/api/notifications/{notification_id}/read` | Any authenticated | — | `200` `{notification_id, is_read: true}`. `403` if notification doesn't belong to caller. `404` if not found. |
+| POST | `/api/notifications/mark-all-read` | Any authenticated | — | `200` `{"marked_read": N}` |
+
+**Notification creation**: All triggering endpoints call `create_notifications(db, events: list[dict])` helper (batch insert) as last step before `db.commit()`. Fan-out events and recipients are documented in `docs/technical-design.md` §4.3.1. Poll-on-login deferred notifications are fired by `check_and_fire_deferred_notifications(db, user_id)` called from the `get_current_user` dependency.
+
+---
+
+## 13. Intake Forms (REQ-03)
+
+Pre-visit intake forms. Created automatically (empty/draft) when an appointment is booked. 1:1 with appointments.
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| GET | `/api/appointments/{appointment_id}/intake` | Patient (own) / Doctor (assigned) / Staff / Admin | — | `200` intake form row (all fields). `403` if patient calling for another patient's appointment. `404` only if no intake form row exists (should not occur in normal flow). |
+| PATCH | `/api/appointments/{appointment_id}/intake` | Patient (own) only | `{chief_complaint?, symptom_duration?, allergies?, current_medications?, pain_scale?, additional_notes?, submit?: bool}` | `200` updated intake form. `403` if appointment.status = 'Completed'. `400` if `submit=true` and chief_complaint or symptom_duration are null. `400` if pain_scale not in 1–10. |
+
+**Trigger**: `POST /api/appointments` atomically inserts an empty `intake_forms` row linked to the new appointment. If intake form insertion fails, the appointment rolls back too.
+
+---
+
+## 14. Vitals (REQ-04)
+
+Patient vital signs recording by Staff. Trend visualization by Doctor. Resolves the pre-existing STF-4 schema gap.
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| GET | `/api/patients/{patient_id}/vitals` | Doctor (AUTHZ-2: must have appointment with patient) / Staff / Admin | query: `page`, `page_size` | `200` `{"items": [{vital_id, patient_id, appointment_id, recorded_by_user_id, systolic_bp, diastolic_bp, weight_kg, pulse_bpm, temperature_celsius, height_cm, recorded_at}], total, page, page_size, total_pages}` ordered by `recorded_at ASC`. `403` if Doctor has no appointment with patient. |
+| POST | `/api/patients/{patient_id}/vitals` | Staff / Admin | `{appointment_id?: int, systolic_bp?: int, diastolic_bp?: int, weight_kg?: float, pulse_bpm?: int, temperature_celsius?: float, height_cm?: float}` | `201` vital row. Validation: at least one measurement field non-null; BP both-or-neither; range checks. `403` if Doctor or Patient. `400` on validation failure. |
+
+**Validation rules**: BP both-or-neither (if one of systolic_bp/diastolic_bp provided, both required). Range: pulse_bpm 20–300; temperature_celsius 30.0–45.0; weight_kg > 0; height_cm > 0.
+
+---
+
+## 15. Referrals (REQ-05)
+
+Inter-department referrals. Doctor creates, receiving-dept doctor accepts/declines. Patient sees own referrals (no clinical `reason` field per OI-6).
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| POST | `/api/doctor/referrals` | Doctor | `{patient_id, receiving_department_id, receiving_doctor_id?, reason, urgency: "Routine"\|"Urgent"}` | `201` referral row. `403` if doctor has no appointment with patient (AUTHZ-2). Fan-out `referral_received` notification to receiving dept doctors. |
+| GET | `/api/doctor/referrals/sent` | Doctor | query: `status?`, `page`, `page_size` | `200` paginated list of referrals where `referring_doctor_id = calling_doctor.id` |
+| GET | `/api/doctor/referrals/received` | Doctor | query: `status?`, `page`, `page_size` | `200` paginated list: referrals where `receiving_department_id = calling_doctor.department_id` AND (`receiving_doctor_id IS NULL` OR `receiving_doctor_id = calling_doctor.doctor_id`). Ordered: Urgent first, then by created_at. |
+| PATCH | `/api/doctor/referrals/{referral_id}/accept` | Doctor | `{note?: "..."}` | `200` updated referral (status='Accepted', receiving_doctor_id set). `403` if calling doctor not in receiving department (AUTHZ-13). `409` if referral already Accepted/Declined. Sends `referral_status_changed` to patient and referring doctor. |
+| PATCH | `/api/doctor/referrals/{referral_id}/decline` | Doctor | `{note: "..." (required)}` | `200` updated referral (status='Declined'). `403` AUTHZ-13. `400` if note missing. Sends `referral_status_changed` to patient and referring doctor. |
+| PATCH | `/api/doctor/referrals/{referral_id}/complete` | Doctor | — | `200` updated referral (status='Completed'). `403` if caller is not `receiving_doctor_id`. |
+| GET | `/api/patients/me/referrals` | Patient | query: `page`, `page_size` | `200` paginated. Fields: referral_id, referring_doctor_name, receiving_department_name, receiving_doctor_name, urgency, status, created_at, receiving_doctor_note. No `reason` field (OI-6). |
+| GET | `/api/admin/referrals` | Admin | query: `status?`, `department_id?`, `start_date?`, `end_date?`, `page`, `page_size` | `200` paginated. Fields: referral_id, referring_doctor_name, receiving_department_name, receiving_doctor_name, urgency, status, created_at, updated_at. No `reason` field (OI-6). |
+
+---
+
+## 16. Analytics (REQ-06)
+
+Admin-only aggregate analytics with optional CSV export. Default date range: today − 365 days through today when params absent.
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| GET | `/api/admin/analytics/appointments` | Admin | query: `start=YYYY-MM-DD`, `end=YYYY-MM-DD`, `format?=csv` | `200 application/json` `{"items": [{"month": "2026-01", "total": 42, "completed": 30, "cancelled": 8, "noshow": 4, "scheduled": 0, "noshow_rate": 9.52}], "start": "...", "end": "..."}` OR `200 text/csv`. `400` if end < start. |
+| GET | `/api/admin/analytics/revenue` | Admin | query: `start`, `end`, `format?=csv` | `200` `{"items": [{"month": "2026-01", "invoiced_cents": 500000, "collected_cents": 320000}]}`. Uses `invoices.created_at` for invoiced; `invoices.paid_at` for collected (OI-7). |
+| GET | `/api/admin/analytics/departments` | Admin | query: `start`, `end`, `format?=csv` | `200` `{"items": [{"department_id": 1, "department_name": "Cardiology", "appointment_count": 95}]}` sorted desc. |
+| GET | `/api/admin/analytics/patient-acquisition` | Admin | query: `start`, `end`, `format?=csv` | `200` `{"items": [{"month": "2026-01", "new_patients": 12}]}` grouped by `users.created_at` month for `role='Patient'`. |
+
+**CSV**: `Content-Type: text/csv`, `Content-Disposition: attachment; filename="gvh_analytics_{metric}_{start}_{end}.csv"`. Body: header row matching JSON field names.
+
+---
+
+## 17. Public Search (REQ-07)
+
+Public search across departments (by name, description, and symptom tags) and doctors (by specialty, bio). Admin manages symptom tags per department.
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| GET | `/api/public/search` | Public | query: `q=...` (2–200 chars) | `200` `{"departments": [{department_id, name, description_snippet, match_type: "name"\|"description"\|"tag"}], "doctors": [{doctor_id, full_name, specialty, department_name, profile_photo_path, match_type: "specialty"\|"bio"}], "query": "...", "total": N}`. `400` if `len(q) < 2`. Active departments and active doctor accounts only. |
+| GET | `/api/admin/departments/{department_id}/tags` | Admin | — | `200` `{"items": [{tag_id, tag_text, created_at}]}` |
+| POST | `/api/admin/departments/{department_id}/tags` | Admin | `{tag_text: "..."}` (max 100 chars) | `201` `{tag_id, department_id, tag_text, created_at}`. `409` if tag_text already exists (case-insensitive). `400` if department already has 50 tags. |
+| PUT | `/api/admin/departments/{department_id}/tags/{tag_id}` | Admin | `{tag_text: "..."}` | `200` updated tag. `409` on case-insensitive conflict. |
+| DELETE | `/api/admin/departments/{department_id}/tags/{tag_id}` | Admin | — | `204` |
+
+---
+
+## 18. PDF Export (REQ-08)
+
+Patient medical record PDF export via WeasyPrint (OI-3 decision). Patient only (AUTHZ-11).
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| GET | `/api/patients/me/export-pdf` | Patient only | query: `start_date?=YYYY-MM-DD`, `end_date?=YYYY-MM-DD` | `200 application/pdf` `Content-Disposition: attachment; filename="GVH_MedicalRecord_{patient_id}_{YYYYMMDD}.pdf"`. `403` for any non-Patient role. `400` if date params invalid. No-records range: PDF still generated with "No visits for the selected period" message. |
+
+**Implementation**: `src/backend/app/services/pdf_export.py` — `get_appointments_for_pdf(db, patient_id, start_date, end_date)` and `render_pdf_template(patient, appointments, date_range)`. Backend uses WeasyPrint (`weasyprint>=60.0`). PDF contains: cover page (hospital name, patient name/DOB/ID, export date, date range), diagonal watermark (every page, via `position: fixed` div, 0.12 opacity), per-appointment sections (date, doctor, department, visit notes, prescriptions, lab results, vitals, intake form, discharge summary), clean page breaks. CSS is print-safe (white background, no glassmorphism).
+
+---
+
+## 19. Waitlist (REQ-09)
+
+Appointment waitlist per-doctor-per-date (OI-12 assumption). Cancellation of an appointment triggers FIFO notification to the first waiting patient. Confirmation window configurable via system_config.
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| POST | `/api/waitlist` | Patient | `{doctor_id, preferred_date: "YYYY-MM-DD"}` | `201` `{entry_id, patient_id, doctor_id, preferred_date, status: "Waiting", created_at, position: N}`. `409` if patient already has active entry for same (doctor_id, preferred_date). |
+| GET | `/api/patients/me/waitlist` | Patient | — | `200` `{"items": [{entry_id, doctor_id, doctor_name, department_name, preferred_date, status, position, notified_at, confirmation_deadline, created_at}]}` active entries only (Waiting or Notified). |
+| DELETE | `/api/patients/me/waitlist/{entry_id}` | Patient | — | `204`. Sets status='Removed'. `403` if entry not caller's. `400` if status already terminal. |
+| POST | `/api/waitlist/{entry_id}/confirm` | Patient | — | `201` `{appointment_id: N}`. `403` if entry not caller's. `400` if status != 'Notified'. `400` if confirmation_deadline passed. `409` if slot taken. |
+| GET | `/api/staff/waitlist/{doctor_id}` | Staff | query: `date?`, `page`, `page_size` | `200` paginated active entries for the doctor. |
+| DELETE | `/api/staff/waitlist/{entry_id}` | Staff | body: `{reason: "..."}` | `204`. Sets status='Removed', records reason. |
+| GET | `/api/admin/config/waitlist` | Admin | — | `200` `{"confirmation_hours": 4}` |
+| PUT | `/api/admin/config/waitlist` | Admin | `{confirmation_hours: N}` (1–72) | `200` `{"confirmation_hours": N}`. `400` if out of range. |
+| GET | `/api/admin/waitlist/stats` | Admin | query: `start=YYYY-MM-DD`, `end=YYYY-MM-DD` | `200` `{"global_avg_minutes": N, "by_doctor": [{doctor_id, doctor_name, avg_minutes, total_confirmations}]}` |
+
+---
+
+## 20. Discharge Summaries (REQ-10)
+
+Doctor creates discharge summary when completing an appointment. Optionally books follow-up in the same atomic transaction (OI-8). Patient can view their own summaries.
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| POST | `/api/doctor/appointments/{appointment_id}/discharge-summary` | Doctor | `{key_findings: "..." (required), patient_instructions?: "...", activity_restrictions?: "...", medication_reminders?: "...", follow_up?: {scheduled_at: "ISO-8601"}}` | `201` `{summary_id, appointment_id, key_findings, ..., follow_up_appointment_id: N\|null}`. `400` if appointment.status != 'Completed'. `403` if doctor not assigned. `409` if summary already exists. If follow_up provided: slot validation runs atomically; `409 {"detail": "Follow-up slot no longer available."}` and no summary created if slot taken. |
+| GET | `/api/doctor/appointments/{appointment_id}/discharge-summary` | Doctor (assigned) | — | `200` summary or `404` if none yet. |
+| GET | `/api/patients/me/discharge-summaries` | Patient | query: `page`, `page_size` | `200` paginated list of patient's own discharge summaries with appointment info. |
+| GET | `/api/patients/me/appointments/{appointment_id}/discharge-summary` | Patient | — | `200` summary. `403` if appointment not patient's own. `404` if no summary. |
+
+---
+
+## 21. Satisfaction Surveys (REQ-11)
+
+Created automatically when appointment transitions to Completed. Triggered 24h after completion (poll-on-login pattern, OI-2). Admin can moderate comments.
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| GET | `/api/patients/me/surveys` | Patient | — | `200` `{"items": [{survey_id, appointment_id, appointment_date, doctor_name, trigger_after, expires_at, submitted_at, status: "pending"\|"submitted"\|"expired"}]}`. Status: `submitted` if submitted_at non-null; `expired` if expires_at < now and submitted_at null; `pending` otherwise. |
+| POST | `/api/patients/me/surveys/{survey_id}` | Patient | `{doctor_star_rating: 1-5, overall_star_rating: 1-5, comment?: "..." (max 1000)}` | `201` `{"survey_id": N, "submitted_at": "..."}`. `403` if survey not caller's. `400` if trigger_after > now. `403` if expires_at < now. `409` if already submitted. |
+| GET | `/api/doctor/ratings` | Doctor | — | `200` `{"average_doctor_rating": 4.3, "total_reviews": 47, "comments": [{comment, submitted_at}]}`. Comments newest-first. No patient identity exposed. |
+| GET | `/api/admin/surveys` | Admin | query: `doctor_id?`, `start_date?`, `end_date?`, `submitted_only?`, `page`, `page_size` | `200` paginated. Each item: survey_id, appointment_id, patient_id, patient_name, doctor_id, doctor_name, doctor_star_rating, overall_star_rating, comment, is_comment_removed, submitted_at. |
+| GET | `/api/admin/surveys/{survey_id}` | Admin | — | `200` single survey record. |
+| PATCH | `/api/admin/surveys/{survey_id}/remove-comment` | Admin | — | `200` `{"survey_id": N, "is_comment_removed": true, "comment": null}`. Idempotent. |
+
+---
+
+## 22. Corporate Packages & Inquiries (REQ-12)
+
+Public B2B landing page with package tiers and inquiry form. Admin manages packages and pipeline. No notification on inquiry submission (OI-17).
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| GET | `/api/public/corporate/packages` | Public | — | `200` `{"items": [{package_id, name, tier_order, description, included_services_json, price_range_display}]}` active packages only, ordered by tier_order ASC. |
+| POST | `/api/public/corporate/inquiries` | Public | `{company_name, contact_name, email, phone?, headcount?, package_id?, preferred_schedule?}` | `201` `{"inquiry_id": N, "message": "Thank you! We'll be in touch shortly."}`. `400` if headcount < 1 (when provided). `422` if required fields missing or email format invalid. |
+| GET | `/api/admin/corporate/packages` | Admin | — | `200` all packages including inactive (fields include is_active). |
+| POST | `/api/admin/corporate/packages` | Admin | `{name, tier_order, description, included_services_json, price_range_display, is_active?}` | `201` new package row. |
+| PUT | `/api/admin/corporate/packages/{package_id}` | Admin | any subset of package fields | `200` updated package. |
+| DELETE | `/api/admin/corporate/packages/{package_id}` | Admin | — | `200` `{"package_id": N, "is_active": false}` (soft delete). |
+| GET | `/api/admin/corporate/inquiries` | Admin | query: `status?`, `page`, `page_size` | `200` `{"items": [...], "total": N, "page": P, "page_size": PS, "total_pages": TP, "pipeline_total_cents": M}` where pipeline_total_cents = SUM(deal_value_cents) WHERE status='ClosedWon'. |
+| GET | `/api/admin/corporate/inquiries/{inquiry_id}` | Admin | — | `200` full inquiry including notes, deal_value_cents. |
+| PATCH | `/api/admin/corporate/inquiries/{inquiry_id}` | Admin | `{status?, notes?, deal_value_cents?}` | `200` updated inquiry. `400` if deal_value_cents < 0. |
 | Section 8.4.3 (dashboard tiles) | `GET /api/billing/dashboard` | Aggregate queries on `invoices` |

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { createUser, listUsers, setUserRole, setUserStatus } from '../../api/admin';
 import type { Role, User } from '../../types';
 import { extractErrorMessage } from '../../api/client';
@@ -164,10 +165,19 @@ export function AdminUsersPage() {
                 </select>
               </td>
               <td>{u.is_active ? 'Active' : 'Inactive'}</td>
-              <td>
+              <td style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                 <button className="btn btn-outline" onClick={() => toggleActive(u)}>
                   {u.is_active ? 'Deactivate' : 'Reactivate'}
                 </button>
+                {u.role === 'Doctor' && (
+                  <Link
+                    className="btn btn-outline btn-sm"
+                    to={`/admin/users/${u.id}/availability`}
+                    title="Manage schedule"
+                  >
+                    Schedule
+                  </Link>
+                )}
               </td>
             </tr>
           ))}

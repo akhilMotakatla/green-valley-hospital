@@ -9,6 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from app.config import BLOG_COVERS_DIR, CORS_ORIGINS, UPLOADS_DIR
 from app.database import init_db
 from app.routers import admin, auth, billing, doctor, lab, patient, public, staff
+from app.routers.availability import admin_avail_router, doctor_avail_router, slots_router
+from app.routers.notifications import router as notifications_router
 
 app = FastAPI(title="Green Valley Hospital API")
 
@@ -52,3 +54,9 @@ app.include_router(billing.router, prefix="/api")
 # Notification endpoints also accept Admin (Section 9.6); mounted on a
 # separate sub-router without the BillingSpecialist-only dependency.
 app.include_router(billing._notif_router, prefix="/api")
+# Batch 2: availability endpoints (REQ-01)
+app.include_router(slots_router, prefix="/api")
+app.include_router(doctor_avail_router, prefix="/api")
+app.include_router(admin_avail_router, prefix="/api")
+# Batch 2: in-app notifications (REQ-02)
+app.include_router(notifications_router, prefix="/api")

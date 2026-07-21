@@ -11,6 +11,7 @@ from app.database import get_db
 from app.deps import get_current_user, require_role
 from app.models import Doctor, LabOrder, LabResult, LabTechnician, Patient, User
 from app.schemas import LabOrderStatusRequest
+from app.services.notification_service import create_notifications
 from app.utils import now_iso, paginate, save_upload, total_pages
 
 router = APIRouter(prefix="/lab", tags=["lab"], dependencies=[Depends(require_role("Lab"))])
@@ -94,6 +95,35 @@ async def create_result(
     )
     db.add(result)
     order.status = "Completed"
+    db.flush()  # get result_id before notification fan-out
+
+    # REQ-02: Notify patient + ordering doctor about lab result
+    patient = db.get(Patient, order.patient_id)
+    ordering_doctor = db.get(Doctor, order.doctor_id)
+    lab_notif_events: list[dict] = []
+    if patient:
+        lab_notif_events.append({
+            "recipient_user_id": patient.user_id,
+            "event_type": "lab_result_ready",
+            "title": "Lab Result Ready",
+            "body": f"Your {order.test_type} lab result is now available.",
+            "related_entity_type": "lab_result",
+            "related_entity_id": result.result_id,
+        })
+    if ordering_doctor:
+        lab_notif_events.append({
+            "recipient_user_id": ordering_doctor.user_id,
+            "event_type": "lab_result_ready",
+            "title": "Lab Result Finalized",
+            "body": (
+                f"Lab result for {patient.user.full_name if patient else 'patient'} "
+                f"({order.test_type}) is now available."
+            ),
+            "related_entity_type": "lab_result",
+            "related_entity_id": result.result_id,
+        })
+    create_notifications(db, lab_notif_events)
+
     db.commit()
     db.refresh(result)
 
@@ -141,6 +171,35 @@ async def amend_result(
         finalized_at=now_iso(),
     )
     db.add(result)
+    db.flush()  # get result_id before notification fan-out
+
+    # REQ-02: Notify patient + ordering doctor about amended lab result
+    patient = db.get(Patient, order.patient_id)
+    ordering_doctor = db.get(Doctor, order.doctor_id)
+    amend_notif_events: list[dict] = []
+    if patient:
+        amend_notif_events.append({
+            "recipient_user_id": patient.user_id,
+            "event_type": "lab_result_ready",
+            "title": "Lab Result Updated",
+            "body": f"Your {order.test_type} lab result has been updated (version {next_version}).",
+            "related_entity_type": "lab_result",
+            "related_entity_id": result.result_id,
+        })
+    if ordering_doctor:
+        amend_notif_events.append({
+            "recipient_user_id": ordering_doctor.user_id,
+            "event_type": "lab_result_ready",
+            "title": "Lab Result Amended",
+            "body": (
+                f"Lab result for {patient.user.full_name if patient else 'patient'} "
+                f"({order.test_type}) has been amended (version {next_version})."
+            ),
+            "related_entity_type": "lab_result",
+            "related_entity_id": result.result_id,
+        })
+    create_notifications(db, amend_notif_events)
+
     db.commit()
     db.refresh(result)
 

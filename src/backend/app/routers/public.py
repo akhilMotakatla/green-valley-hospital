@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import BlogArticle, ContactMessage, Department, Doctor, SiteContent, User
+from app.services.notification_service import create_notifications
 from app.utils import loads, paginate, total_pages
 from sqlalchemy import asc
 
@@ -201,6 +202,25 @@ def submit_contact_message(payload: dict, db: Session = Depends(get_db)):
         status="New",
     )
     db.add(message)
+    db.flush()  # get message_id before notification fan-out
+
+    # REQ-02: Fan-out to all active Admin and Staff users (OI-11)
+    admin_staff = db.query(User).filter(User.role.in_(["Admin", "Staff"]), User.is_active == 1).all()
+    contact_events: list[dict] = [
+        {
+            "recipient_user_id": u.id,
+            "event_type": "contact_form_received",
+            "title": "New Contact Message",
+            "body": (
+                f"New message from {message.name} ({message.email}): {message.subject}"
+            ),
+            "related_entity_type": "contact_message",
+            "related_entity_id": message.message_id,
+        }
+        for u in admin_staff
+    ]
+    create_notifications(db, contact_events)
+
     db.commit()
     db.refresh(message)
     return {"message_id": message.message_id, "status": message.status, "created_at": message.created_at}

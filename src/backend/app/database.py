@@ -124,3 +124,77 @@ def init_db() -> None:
         for ddl in new_indexes:
             conn.execute(_sa.text(ddl))
         conn.commit()
+
+        # ---- Batch 2 (2026-07-20): invoices.paid_at (OI-7) ------------------
+        result = conn.execute(_sa.text("PRAGMA table_info(invoices)"))
+        existing_cols = {row[1] for row in result.fetchall()}
+        if "paid_at" not in existing_cols:
+            conn.execute(_sa.text("ALTER TABLE invoices ADD COLUMN paid_at TEXT"))
+            conn.execute(_sa.text(
+                "CREATE INDEX IF NOT EXISTS idx_invoices_paid_at ON invoices(paid_at)"
+            ))
+            conn.commit()
+
+        # ---- Batch 2: vitals table schema upgrade ----------------------------
+        # The pre-Batch-2 Vitals model used different column names (vitals_id PK,
+        # blood_pressure TEXT, temperature_c). The Batch 2 schema uses vital_id,
+        # systolic_bp/diastolic_bp, temperature_celsius, recorded_at.
+        # Detect the old schema by checking for vitals_id and recreate if needed.
+        result = conn.execute(_sa.text("PRAGMA table_info(vitals)"))
+        vitals_cols = {row[1] for row in result.fetchall()}
+        if "vitals_id" in vitals_cols:
+            # Old schema present — drop and recreate with Batch 2 schema.
+            conn.execute(_sa.text("PRAGMA foreign_keys = OFF"))
+            conn.execute(_sa.text("DROP TABLE IF EXISTS vitals"))
+            conn.execute(_sa.text("""
+                CREATE TABLE vitals (
+                    vital_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    patient_id INTEGER NOT NULL REFERENCES patients(patient_id) ON DELETE CASCADE,
+                    appointment_id INTEGER REFERENCES appointments(appointment_id) ON DELETE SET NULL,
+                    recorded_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+                    systolic_bp INTEGER,
+                    diastolic_bp INTEGER,
+                    weight_kg REAL,
+                    pulse_bpm INTEGER,
+                    temperature_celsius REAL,
+                    height_cm REAL,
+                    recorded_at VARCHAR NOT NULL
+                )
+            """))
+            conn.execute(_sa.text("PRAGMA foreign_keys = ON"))
+            conn.commit()
+
+        # ---- Batch 2: new indexes (idempotent) --------------------------------
+        batch2_indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_vitals_patient ON vitals(patient_id)",
+            "CREATE INDEX IF NOT EXISTS idx_vitals_appointment ON vitals(appointment_id)",
+            "CREATE INDEX IF NOT EXISTS idx_vitals_recorded_at ON vitals(recorded_at)",
+            "CREATE INDEX IF NOT EXISTS idx_avail_schedules_doctor ON doctor_availability_schedules(doctor_id)",
+            "CREATE INDEX IF NOT EXISTS idx_avail_blocks_doctor ON doctor_availability_blocks(doctor_id)",
+            "CREATE INDEX IF NOT EXISTS idx_avail_blocks_date ON doctor_availability_blocks(block_date)",
+            "CREATE INDEX IF NOT EXISTS idx_notifications_recipient_read ON notifications(recipient_user_id, is_read)",
+            "CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_notif_schedules_poll ON notification_schedules(trigger_at, is_fired)",
+            "CREATE INDEX IF NOT EXISTS idx_intake_forms_appointment ON intake_forms(appointment_id)",
+            "CREATE INDEX IF NOT EXISTS idx_intake_forms_patient ON intake_forms(patient_id)",
+            "CREATE INDEX IF NOT EXISTS idx_waitlist_doctor_date_queue ON waitlist_entries(doctor_id, preferred_date, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_waitlist_patient ON waitlist_entries(patient_id)",
+            "CREATE INDEX IF NOT EXISTS idx_discharge_patient ON discharge_summaries(patient_id)",
+            "CREATE INDEX IF NOT EXISTS idx_discharge_doctor ON discharge_summaries(doctor_id)",
+            "CREATE INDEX IF NOT EXISTS idx_surveys_patient ON satisfaction_surveys(patient_id)",
+            "CREATE INDEX IF NOT EXISTS idx_surveys_doctor ON satisfaction_surveys(doctor_id)",
+            "CREATE INDEX IF NOT EXISTS idx_surveys_poll ON satisfaction_surveys(patient_id, notification_sent, submitted_at)",
+            "CREATE INDEX IF NOT EXISTS idx_corp_packages_active ON corporate_packages(is_active, tier_order)",
+            "CREATE INDEX IF NOT EXISTS idx_corp_inquiries_status ON corporate_inquiries(status)",
+            "CREATE INDEX IF NOT EXISTS idx_corp_inquiries_created_at ON corporate_inquiries(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_symptom_tags_department ON department_symptom_tags(department_id)",
+            "CREATE INDEX IF NOT EXISTS idx_symptom_tags_text ON department_symptom_tags(tag_text)",
+            "CREATE INDEX IF NOT EXISTS idx_referrals_patient ON referrals(patient_id)",
+            "CREATE INDEX IF NOT EXISTS idx_referrals_referring ON referrals(referring_doctor_id)",
+            "CREATE INDEX IF NOT EXISTS idx_referrals_recv_dept ON referrals(receiving_department_id)",
+            "CREATE INDEX IF NOT EXISTS idx_referrals_status ON referrals(status)",
+            "CREATE INDEX IF NOT EXISTS idx_referrals_dept_queue ON referrals(receiving_department_id, status, urgency, created_at)",
+        ]
+        for ddl in batch2_indexes:
+            conn.execute(_sa.text(ddl))
+        conn.commit()

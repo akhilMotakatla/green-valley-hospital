@@ -50,6 +50,16 @@ A single-instance web application with a Python backend API and a React single-p
 - **Migrations**: `db/schema.sql` is the canonical DDL for this build (SQLite, single file). Alembic may be introduced later; out of scope for this stage.
 - **File storage**: local disk under `/uploads/`, subfolders `lab_results/` and `blog_covers/`. DB stores only the relative path (`file_attachment_path`, `cover_image_path`). Static files served through a backend route so lab-result attachments can be access-controlled (never mounted as an open static directory); blog cover images are mounted as public static files since they're already public content.
 
+### 1.1.1 Batch 2 backend library additions (2026-07-20)
+
+**WeasyPrint** (`weasyprint>=60.0`, OI-3 decision): Server-side PDF generation for REQ-08 (Patient Medical Record Export). Takes an HTML string rendered via Python string templates, converts to PDF using CSS `@page` rules and `position: fixed` for watermarks. Does not require a headless browser but requires system fonts (libpango/libcairo). On Windows dev environments, GTK+ runtime may be needed. See `src/backend/app/services/pdf_export.py` for the rendering service and `docs/delivery-plan.md` §4.2 R-1 for the Windows risk note.
+
+**Poll-on-login notification pattern** (OI-2 decision): No background scheduler (APScheduler/Celery) added. Instead, `check_and_fire_deferred_notifications(db, user_id)` is called from the `get_current_user` FastAPI dependency on every authenticated request. This function:
+1. Queries `notification_schedules` for unfired `appointment_reminder` rows where `trigger_at <= now` and the appointment belongs to the requesting user's patient profile.
+2. Queries `satisfaction_surveys` for rows where `notification_sent=0`, `trigger_after <= now`, `expires_at > now`, `submitted_at IS NULL`, and `patient_id` matches.
+3. Creates notifications and marks rows as fired/sent atomically.
+Known limitation: notifications fire on next login, not at exact scheduled time. Acceptable for this build's scale.
+
 ### 1.2 Frontend
 - **Framework**: React 19 + Vite + TypeScript.
 - **Routing**: React Router v6, with a top-level split between public routes and role-guarded route trees:
@@ -62,6 +72,10 @@ A single-instance web application with a Python backend API and a React single-p
 - **Route guards**: a `<RequireAuth roles={[...]}>` wrapper reads the decoded JWT (role claim) from an auth context/store; unauthenticated users are redirected to `/login`, wrong-role users are redirected to a 403/"not authorized" page. This is a UX convenience only — the backend is the actual enforcement point (AUTHZ-6).
 - **State/data fetching**: a thin API client (e.g. fetch wrapper or React Query) attaches the JWT as `Authorization: Bearer <token>` on every request to a protected endpoint.
 - **Token storage**: JWT kept in memory + `localStorage` for session persistence across reloads (acceptable for this demo scope; no refresh-token rotation implemented — access token TTL is short, see §3).
+
+### 1.2.1 Batch 2 frontend library additions (2026-07-20)
+
+**Recharts** (`recharts ^2.12.0`, OI-4 decision): React-native SVG chart library for REQ-04 (Vitals Trend Visualization) and REQ-06 (Analytics Dashboard). Chosen over react-chartjs-2 (Canvas-based, harder accessibility) and Nivo (heavier d3 dependency). Produces accessible SVG output. Accessibility requirement VITFR-5: charts must use `strokeDasharray` dash patterns to distinguish series (not color alone), with ARIA labels on chart containers and Recharts `<Legend>` showing both color and dash-pattern symbols.
 
 ---
 
@@ -236,6 +250,29 @@ erDiagram
 ```
 
 Note: `LAB_RESULT` models amendment/versioning (LAB-4 / AC-LAB-3) as multiple rows per `order_id` (`version` incrementing, `is_finalized` flag) rather than in-place overwrite — see schema comments.
+
+### Batch 2 ER additions (2026-07-20 — REQ-01 through REQ-12)
+
+16 new tables added to `db/schema.sql` in the Batch 2 block. FK relationships below:
+
+- `DOCTOR_AVAILABILITY_SCHEDULES` — FK to `DOCTOR` (doctor_id). One row per (doctor, day_of_week, start_time) time window. `UNIQUE (doctor_id, day_of_week, start_time)`.
+- `DOCTOR_SLOT_CONFIGS` — FK to `DOCTOR` (doctor_id, UNIQUE). Stores slot_duration_minutes per doctor (default 30).
+- `DOCTOR_AVAILABILITY_BLOCKS` — FK to `DOCTOR` (doctor_id). Date-specific overrides (full-day or time-range). NULL start_time/end_time = full-day block.
+- `NOTIFICATIONS` — FK to `USER` (recipient_user_id). In-app notification inbox (separate from `email_notifications` which is the billing file-sink). Compound index on (recipient_user_id, is_read) for O(1) unread count.
+- `NOTIFICATION_SCHEDULES` — FK to `APPOINTMENT` (appointment_id); soft FK to `SATISFACTION_SURVEYS` (survey_id). Deferred notification triggers for poll-on-login pattern.
+- `INTAKE_FORMS` — FK to `APPOINTMENT` (UNIQUE) and `PATIENT`. Auto-created on appointment booking. 1:1 with appointments.
+- `VITALS` — FK to `PATIENT`, `APPOINTMENT` (nullable), `USER` (recorded_by_user_id). Resolves pre-existing STF-4 schema gap.
+- `REFERRALS` — FK to `DOCTOR` (referring_doctor_id, receiving_doctor_id), `DEPARTMENT` (receiving_department_id), `PATIENT`, `APPOINTMENT` (referred_appointment_id, nullable). Status: Pending → Accepted/Declined → AppointmentBooked → Completed.
+- `DEPARTMENT_SYMPTOM_TAGS` — FK to `DEPARTMENT`. Up to 50 tags per department for public search enrichment. Case-insensitive uniqueness enforced at app layer.
+- `WAITLIST_ENTRIES` — FK to `PATIENT`, `DOCTOR`. Per-doctor-per-date (OI-12). `held_slot_time` records which HH:MM slot is reserved for a 'Notified' entry.
+- `SYSTEM_CONFIG` — Key-value store. Initial row: `waitlist_confirmation_hours = 4`.
+- `DISCHARGE_SUMMARIES` — FK to `APPOINTMENT` (UNIQUE, ON DELETE RESTRICT), `PATIENT`, `DOCTOR`, `APPOINTMENT` (follow_up_appointment_id, nullable). 1:1 with completed appointments. Immutable after creation.
+- `SATISFACTION_SURVEYS` — FK to `APPOINTMENT` (UNIQUE, ON DELETE RESTRICT), `PATIENT`, `DOCTOR`. 1:1 with completed appointments. `notification_sent` flag for poll-on-login.
+- `CORPORATE_PACKAGES` — Standalone B2B package tiers. Soft delete via `is_active`.
+- `CORPORATE_INQUIRIES` — FK to `CORPORATE_PACKAGES` (package_id, nullable ON DELETE SET NULL). Pipeline CRM rows.
+
+Column addition to existing table:
+- `INVOICE.paid_at TEXT` — set server-side when status transitions to 'Paid'. Used by analytics revenue 'collected' series (OI-7). Index: `idx_invoices_paid_at`.
 
 ---
 

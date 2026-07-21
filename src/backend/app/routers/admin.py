@@ -37,6 +37,7 @@ from app.schemas import (
     SiteContentHomeRequest,
 )
 from app.security import hash_password
+from app.services.notification_service import create_notifications
 from app.utils import dumps, now_iso, paginate, save_upload, total_pages, unique_slug, utcnow, write_audit_log
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_role("Admin"))])
@@ -133,6 +134,20 @@ def create_user(payload: AdminCreateUserRequest, current_user: User = Depends(re
         profile = {"billing_specialist_id": bs.billing_specialist_id, "employee_id": bs.employee_id}
 
     write_audit_log(db, actor_user_id=current_user.id, action="user_created", target_user_id=user.id, details=f"role={payload.role}")
+
+    # REQ-02: Notify the newly created user
+    create_notifications(db, [{
+        "recipient_user_id": user.id,
+        "event_type": "account_created",
+        "title": "Welcome to Green Valley Hospital",
+        "body": (
+            f"Your account has been created with role: {user.role}. "
+            f"Log in to get started."
+        ),
+        "related_entity_type": "user",
+        "related_entity_id": user.id,
+    }])
+
     db.commit()
     db.refresh(user)
 
@@ -251,6 +266,21 @@ def update_user_status(user_id: int, payload: AdminUserStatusRequest, current_us
     user.is_active = 1 if payload.is_active else 0
     action = "user_reactivated" if payload.is_active else "user_deactivated"
     write_audit_log(db, actor_user_id=current_user.id, action=action, target_user_id=user.id)
+
+    # REQ-02: Notify the user when their account is deactivated
+    if not payload.is_active:
+        create_notifications(db, [{
+            "recipient_user_id": user.id,
+            "event_type": "account_deactivated",
+            "title": "Account Deactivated",
+            "body": (
+                "Your Green Valley Hospital account has been deactivated. "
+                "Please contact the administrator for assistance."
+            ),
+            "related_entity_type": "user",
+            "related_entity_id": user.id,
+        }])
+
     db.commit()
     return {"id": user.id, "is_active": bool(user.is_active)}
 

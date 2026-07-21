@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
@@ -9,8 +9,10 @@ from sqlalchemy.orm import Session
 from app.config import CANCELLATION_NOTICE_HOURS
 from app.database import get_db
 from app.deps import require_role
-from app.models import Appointment, Department, Doctor, Invoice, LabOrder, LabResult, Patient, Prescription, User, VisitNote
+from app.models import Appointment, Department, Doctor, IntakeForm, Invoice, LabOrder, LabResult, Patient, Prescription, User, VisitNote
 from app.schemas import BookAppointmentRequest, PatientUpdateMeRequest
+from app.services.availability import get_available_slots
+from app.services.notification_service import create_appointment_reminder_schedule, create_notifications
 from app.utils import loads, paginate, parse_iso, total_pages, utcnow
 
 router = APIRouter(prefix="/patients", tags=["patient"], dependencies=[Depends(require_role("Patient"))])
@@ -118,17 +120,20 @@ def book_appointment(payload: BookAppointmentRequest, current_user: User = Depen
     if doctor is None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid doctor_id")
 
-    existing = (
-        db.query(Appointment)
-        .filter(
-            Appointment.doctor_id == payload.doctor_id,
-            Appointment.scheduled_at == payload.scheduled_at,
-            Appointment.status.in_(["Scheduled", "Completed"]),
+    # REQ-01: Validate that the requested slot is currently available
+    try:
+        scheduled_dt = datetime.fromisoformat(payload.scheduled_at.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="scheduled_at must be a valid ISO-8601 datetime")
+
+    date_str = scheduled_dt.strftime("%Y-%m-%d")
+    slot_str = scheduled_dt.strftime("%H:%M")
+    available_slots = get_available_slots(db, payload.doctor_id, date_str)
+    if available_slots and slot_str not in available_slots:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Slot no longer available. Please select another time.",
         )
-        .first()
-    )
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This time slot is already booked for the selected doctor")
 
     appointment = Appointment(
         patient_id=patient.patient_id,
@@ -139,11 +144,54 @@ def book_appointment(payload: BookAppointmentRequest, current_user: User = Depen
         created_by_user_id=current_user.id,
     )
     db.add(appointment)
+    db.flush()  # get appointment_id before intake form insert
+
+    # REQ-03: Auto-create empty intake form atomically with appointment
+    intake = IntakeForm(
+        appointment_id=appointment.appointment_id,
+        patient_id=patient.patient_id,
+    )
+    db.add(intake)
+
+    # REQ-01: Schedule reminder notification ~24h before
+    create_appointment_reminder_schedule(db, appointment)
+
+    # REQ-02: Fan-out notifications to patient + doctor
+    doctor_user = db.get(User, doctor.user_id)
+    events = [
+        {
+            "recipient_user_id": current_user.id,
+            "event_type": "appointment_confirmed",
+            "title": "Appointment Confirmed",
+            "body": (
+                f"Your appointment with {doctor_user.full_name if doctor_user else 'your doctor'} "
+                f"on {scheduled_dt.strftime('%b %d, %Y at %H:%M')} has been confirmed."
+            ),
+            "related_entity_type": "appointment",
+            "related_entity_id": appointment.appointment_id,
+        },
+        {
+            "recipient_user_id": doctor.user_id,
+            "event_type": "appointment_confirmed",
+            "title": "New Appointment Booked",
+            "body": (
+                f"A new appointment has been booked with {current_user.full_name} "
+                f"on {scheduled_dt.strftime('%b %d, %Y at %H:%M')}."
+            ),
+            "related_entity_type": "appointment",
+            "related_entity_id": appointment.appointment_id,
+        },
+    ]
+    create_notifications(db, events)
+
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This time slot is already booked for the selected doctor")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Slot no longer available. Please select another time.",
+        )
     db.refresh(appointment)
 
     return {
@@ -203,6 +251,36 @@ def cancel_my_appointment(appointment_id: int, current_user: User = Depends(requ
         )
 
     appointment.status = "Cancelled"
+
+    # REQ-02: Notify patient + doctor about cancellation
+    doctor = db.get(Doctor, appointment.doctor_id)
+    cancel_events: list[dict] = [
+        {
+            "recipient_user_id": current_user.id,
+            "event_type": "appointment_cancelled",
+            "title": "Appointment Cancelled",
+            "body": (
+                f"Your appointment on "
+                f"{appointment.scheduled_at[:16].replace('T', ' ')} has been cancelled."
+            ),
+            "related_entity_type": "appointment",
+            "related_entity_id": appointment.appointment_id,
+        }
+    ]
+    if doctor:
+        cancel_events.append({
+            "recipient_user_id": doctor.user_id,
+            "event_type": "appointment_cancelled",
+            "title": "Appointment Cancelled",
+            "body": (
+                f"Appointment with {current_user.full_name} on "
+                f"{appointment.scheduled_at[:16].replace('T', ' ')} has been cancelled by the patient."
+            ),
+            "related_entity_type": "appointment",
+            "related_entity_id": appointment.appointment_id,
+        })
+    create_notifications(db, cancel_events)
+
     db.commit()
     return {"appointment_id": appointment.appointment_id, "status": appointment.status}
 
