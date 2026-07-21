@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FileText, Receipt, FlaskConical } from 'lucide-react';
-import { getMyRecords } from '../../api/patient';
+import { FileText, Receipt, FlaskConical, Download, X } from 'lucide-react';
+import { getMyRecords, exportPDF } from '../../api/patient';
 import type { PatientRecordsBundle } from '../../types';
 import { extractErrorMessage } from '../../api/client';
 import { formatDateTime } from '../../utils/format';
@@ -11,6 +11,41 @@ export function PatientRecordsPage() {
   const [records, setRecords] = useState<PatientRecordsBundle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // REQ-08: PDF export state
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState('');
+  const [exportEndDate, setExportEndDate] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  async function handleExport(startDate?: string, endDate?: string) {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const blob = await exportPDF(startDate, endDate);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `GVH_MedicalRecord_${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setShowExportModal(false);
+      setExportStartDate('');
+      setExportEndDate('');
+    } catch (err) {
+      const msg = extractErrorMessage(err);
+      if (msg.includes('503') || msg.includes('unavailable') || msg.includes('GTK3')) {
+        setExportError('PDF export is currently unavailable. Please try again later.');
+      } else {
+        setExportError('PDF generation failed. Please try again.');
+      }
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const load = useCallback(() => {
     setLoading(true);
@@ -28,7 +63,62 @@ export function PatientRecordsPage() {
 
   return (
     <div>
-      <h1>My Medical Records</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+        <h1 style={{ margin: 0 }}>My Medical Records</h1>
+        <button className="btn btn-outline" onClick={() => setShowExportModal(true)}>
+          <Download size={16} style={{ marginRight: '0.4rem' }} />
+          Export PDF
+        </button>
+      </div>
+
+      {/* REQ-08: PDF Export Modal */}
+      {showExportModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: 420 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h2 style={{ margin: 0 }}>Download My Records</h2>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowExportModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <p className="muted">Optionally filter by date range. Leave blank to export all records.</p>
+            {exportError && <p style={{ color: 'var(--color-danger)', marginBottom: '0.5rem' }}>{exportError}</p>}
+            <div className="form-group">
+              <label>From Date (optional)</label>
+              <input
+                type="date"
+                className="form-control"
+                value={exportStartDate}
+                onChange={(e) => setExportStartDate(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label>To Date (optional)</label>
+              <input
+                type="date"
+                className="form-control"
+                value={exportEndDate}
+                onChange={(e) => setExportEndDate(e.target.value)}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+              <button
+                className="btn btn-primary"
+                disabled={exporting}
+                onClick={() => handleExport(exportStartDate || undefined, exportEndDate || undefined)}
+              >
+                {exporting ? 'Generating...' : (exportStartDate || exportEndDate ? 'Export Selected Range' : 'Export All Records')}
+              </button>
+              <button className="btn btn-outline" onClick={() => setShowExportModal(false)} disabled={exporting}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="section">
         <h2>Visit Notes</h2>
