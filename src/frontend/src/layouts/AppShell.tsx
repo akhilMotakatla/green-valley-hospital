@@ -20,6 +20,7 @@ import {
   Settings,
   Star,
   ArrowRightLeft,
+  BarChart2,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { Logo } from '../components/Logo';
@@ -44,6 +45,7 @@ const navByRole: Record<string, NavItem[]> = {
     { to: '/admin/surveys',           label: 'Surveys',          icon: <Star size={16} /> },
     { to: '/admin/referrals',         label: 'Referrals',        icon: <ArrowRightLeft size={16} /> },
     { to: '/admin/corporate',         label: 'Corporate',        icon: <Building2 size={16} /> },
+    { to: '/admin/analytics',         label: 'Analytics',        icon: <BarChart2 size={16} /> },
     { to: '/admin/config',            label: 'Configuration',    icon: <Settings size={16} /> },
   ],
   Doctor: [
