@@ -4,14 +4,17 @@
  * via the shared SlotPicker component.
  */
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getDepartments } from '../../api/public';
 import { bookAppointment, searchDoctors, type PatientVisibleDoctor } from '../../api/patient';
 import { getAvailableSlots } from '../../api/availability';
+import { joinWaitlist } from '../../api/waitlist';
 import type { Department } from '../../types';
 import { extractErrorMessage } from '../../api/client';
 import { SlotPicker } from '../../components/SlotPicker';
 
 export function BookAppointmentPage() {
+  const navigate = useNavigate();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [departmentId, setDepartmentId] = useState<string>('');
   const [doctors, setDoctors] = useState<PatientVisibleDoctor[]>([]);
@@ -24,6 +27,7 @@ export function BookAppointmentPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [joiningWaitlist, setJoiningWaitlist] = useState(false);
 
   useEffect(() => {
     getDepartments().then(setDepartments).catch(() => undefined);
@@ -52,6 +56,21 @@ export function BookAppointmentPage() {
         setSlotsLoading(false);
       });
   }, [doctorId, date]);
+
+  async function handleJoinWaitlist() {
+    if (!doctorId || !date) return;
+    setJoiningWaitlist(true);
+    setError(null);
+    try {
+      await joinWaitlist({ doctor_id: Number(doctorId), preferred_date: date });
+      setSuccess(`You've joined the waitlist for ${date}. We'll notify you when a slot opens.`);
+      setTimeout(() => navigate('/patient/waitlist'), 1500);
+    } catch (e) {
+      setError(extractErrorMessage(e));
+    } finally {
+      setJoiningWaitlist(false);
+    }
+  }
 
   async function handleBook() {
     setError(null);
@@ -140,6 +159,8 @@ export function BookAppointmentPage() {
               onSelect={setSelectedSlot}
               loading={slotsLoading}
               ready={!slotsLoading}
+              onJoinWaitlist={handleJoinWaitlist}
+              joiningWaitlist={joiningWaitlist}
             />
           </div>
         )}
