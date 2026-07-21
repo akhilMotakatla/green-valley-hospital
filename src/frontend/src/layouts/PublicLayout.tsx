@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
-import { NavLink, Outlet, Link, useLocation } from 'react-router-dom';
+import type { FormEvent, KeyboardEvent } from 'react';
+import { NavLink, Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   PhoneCall,
   Home,
@@ -17,6 +17,7 @@ import {
   Users,
   Send,
   CheckCircle,
+  Search,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { Logo } from '../components/Logo';
@@ -42,10 +43,27 @@ const FOOTER_DEPARTMENTS = [
 export function PublicLayout() {
   const { isAuthenticated, user, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const isHomePage = location.pathname === '/';
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+
+  function handleSearch(e: FormEvent) {
+    e.preventDefault();
+    if (searchQuery.trim().length < 2) return;
+    navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+    setSearchQuery('');
+  }
+
+  function handleSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      handleSearch(e as unknown as FormEvent);
+    }
+  }
 
   // Newsletter form state
   const [newsletterEmail, setNewsletterEmail] = useState('');
@@ -86,6 +104,7 @@ export function PublicLayout() {
     { to: '/departments', label: 'Departments', icon: <Building2 size={16} /> },
     { to: '/blog', label: 'Blog', icon: <BookOpen size={16} /> },
     { to: '/contact', label: 'Contact', icon: <Phone size={16} /> },
+    { to: '/corporate', label: 'For Organizations', icon: <Building2 size={16} /> },
   ];
 
   return (
@@ -115,6 +134,40 @@ export function PublicLayout() {
             </NavLink>
           ))}
         </nav>
+
+        {/* Desktop search bar (>= 768px) */}
+        <form
+          onSubmit={handleSearch}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.25rem',
+            background: 'rgba(255,255,255,0.1)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '20px',
+            padding: '0.25rem 0.5rem 0.25rem 0.75rem',
+          }}
+          role="search"
+          aria-label="Search symptoms, conditions, doctors"
+        >
+          <Search size={14} style={{ opacity: 0.7, flexShrink: 0 }} />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Search symptoms, doctors..."
+            style={{
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              color: 'inherit',
+              width: 160,
+              fontSize: '0.8rem',
+            }}
+            aria-label="Search query"
+          />
+        </form>
 
         <div className="nav-auth">
           {isAuthenticated && user ? (
@@ -149,6 +202,39 @@ export function PublicLayout() {
 
         {/* Mobile dropdown */}
         <div className={`mobile-menu${menuOpen ? ' open' : ''}`}>
+          {/* Mobile search */}
+          <form
+            onSubmit={handleSearch}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              background: 'rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '8px',
+              padding: '0.5rem 0.75rem',
+              marginBottom: '0.5rem',
+            }}
+            role="search"
+          >
+            <Search size={16} style={{ opacity: 0.7, flexShrink: 0 }} />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search symptoms, doctors..."
+              style={{
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                color: 'inherit',
+                flex: 1,
+                fontSize: '0.9rem',
+              }}
+            />
+            <button type="submit" className="btn btn-ghost btn-sm" style={{ padding: '0.25rem 0.5rem' }}>Go</button>
+          </form>
           {navLinks.map((l) => (
             <NavLink
               key={l.to}
