@@ -20,6 +20,7 @@ from app.routers.referrals import router as referrals_router
 from app.routers.search import router as search_router
 from app.routers.pdf import router as pdf_router
 from app.routers.corporate import router as corporate_router
+from app.routers.analytics import router as analytics_router
 
 app = FastAPI(title="Green Valley Hospital API")
 
@@ -81,3 +82,5 @@ app.include_router(referrals_router, prefix="/api")
 app.include_router(search_router, prefix="/api")
 app.include_router(pdf_router, prefix="/api")
 app.include_router(corporate_router, prefix="/api")
+# Batch 2 Group D: analytics dashboard (REQ-06)
+app.include_router(analytics_router, prefix="/api")
