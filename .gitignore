@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+src/backend/venv/
+src/backend/.venv/
+*.egg-info/
+
+# Database (generated at boot)
+db/green_valley.db
+
+# Uploaded files (generated at runtime)
+uploads/
+
+# Node / frontend
+node_modules/
+dist/
+.env
+.env.local
+
+# Editor
+.vscode/
+.idea/
