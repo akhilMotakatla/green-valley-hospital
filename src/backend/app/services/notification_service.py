@@ -10,7 +10,7 @@ the LAST step before db.commit() in any triggering endpoint.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -58,7 +58,7 @@ def check_and_fire_deferred_notifications(db: Session, user_id: int) -> None:
     2. survey_available: satisfaction_surveys rows where trigger_after <= now,
        submitted_at IS NULL, expires_at > now, notification_sent=0.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     now_str = now.isoformat()
 
     # Find patient profile for this user (may not exist for non-patient roles)
@@ -210,7 +210,7 @@ def create_survey_for_appointment(db: Session, appointment: Appointment) -> None
     if existing:
         return
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     trigger_after = (now + timedelta(hours=24)).isoformat()
     expires_at = (now + timedelta(hours=24 + 7 * 24)).isoformat()
 
