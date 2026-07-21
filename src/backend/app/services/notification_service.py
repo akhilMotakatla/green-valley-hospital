@@ -65,29 +65,38 @@ def check_and_fire_deferred_notifications(db: Session, user_id: int) -> None:
     patient = db.query(Patient).filter(Patient.user_id == user_id).first()
 
     # 1. Appointment reminders
-    pending_schedules = (
-        db.query(NotificationSchedule)
-        .join(Appointment, NotificationSchedule.appointment_id == Appointment.appointment_id)
-        .filter(
-            NotificationSchedule.trigger_type == "appointment_reminder",
-            NotificationSchedule.trigger_at <= now_str,
-            NotificationSchedule.is_fired == 0,
+    # Issue 1 fix: scope query to the current patient's appointments only so we
+    # never mark another patient's schedule as fired without sending them a
+    # notification.  The query is inside the `if patient` guard for the same
+    # reason — non-patient roles (Doctor, Admin, …) do not own patient-side
+    # reminder schedules and should not touch them.
+    pending_schedules: list = []
+    if patient:
+        pending_schedules = (
+            db.query(NotificationSchedule)
+            .join(Appointment, NotificationSchedule.appointment_id == Appointment.appointment_id)
+            .filter(
+                NotificationSchedule.trigger_type == "appointment_reminder",
+                NotificationSchedule.trigger_at <= now_str,
+                NotificationSchedule.is_fired == 0,
+                Appointment.patient_id == patient.patient_id,  # Issue 1: patient-scoped
+            )
+            .all()
         )
-        .all()
-    )
-    for sched in pending_schedules:
-        # Only fire if appointment belongs to this user's patient (or doctor)
-        appt = db.get(Appointment, sched.appointment_id)
-        if appt is None:
-            continue
-        # Fire for patient
-        if patient and appt.patient_id == patient.patient_id:
-            # Get doctor name
+        for sched in pending_schedules:
+            appt = db.get(Appointment, sched.appointment_id)
+            if appt is None:
+                sched.is_fired = 1
+                continue
+
+            # Build doctor display name once for reuse in both notifications
             doctor_name = "your doctor"
             if appt.doctor:
                 doc_user = db.get(User, appt.doctor.user_id)
                 if doc_user:
                     doctor_name = doc_user.full_name
+
+            # Fire reminder for the patient
             create_notifications(db, [{
                 "recipient_user_id": user_id,
                 "event_type": "appointment_reminder",
@@ -99,7 +108,24 @@ def check_and_fire_deferred_notifications(db: Session, user_id: int) -> None:
                 "related_entity_type": "appointment",
                 "related_entity_id": appt.appointment_id,
             }])
-        sched.is_fired = 1
+
+            # Issue 4 fix: also fire reminder for the assigned doctor
+            if appt.doctor_id and appt.doctor:
+                patient_name = patient.user.full_name if patient.user else "a patient"
+                create_notifications(db, [{
+                    "recipient_user_id": appt.doctor.user_id,
+                    "event_type": "appointment_reminder",
+                    "title": "Appointment Reminder",
+                    "body": (
+                        f"Reminder: you have an appointment with {patient_name} "
+                        f"scheduled at {appt.scheduled_at[:16].replace('T', ' ')}."
+                    ),
+                    "related_entity_type": "appointment",
+                    "related_entity_id": appt.appointment_id,
+                }])
+
+            # Mark fired only after both notifications have been created
+            sched.is_fired = 1
 
     # 2. Survey availability
     if patient:

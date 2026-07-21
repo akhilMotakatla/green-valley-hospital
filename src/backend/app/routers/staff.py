@@ -271,7 +271,7 @@ def update_appointment(appointment_id: int, payload: StaffAppointmentUpdateReque
     if payload.reason is not None:
         appointment.reason = payload.reason
 
-    # REQ-02: Notify patient + doctor when staff cancels an appointment
+    # REQ-02: Notify patient + doctor on relevant status transitions
     if payload.status == "Cancelled" and prev_status != "Cancelled":
         patient = db.get(Patient, appointment.patient_id)
         doctor = db.get(Doctor, appointment.doctor_id)
@@ -301,6 +301,22 @@ def update_appointment(appointment_id: int, payload: StaffAppointmentUpdateReque
                 "related_entity_id": appointment.appointment_id,
             })
         create_notifications(db, cancel_events)
+    elif payload.status == "NoShow" and prev_status != "NoShow":
+        # REQ-02: Notify patient that they were marked as a no-show
+        patient = db.get(Patient, appointment.patient_id)
+        if patient:
+            create_notifications(db, [{
+                "recipient_user_id": patient.user_id,
+                "event_type": "appointment_noshow",
+                "title": "Appointment No-Show",
+                "body": (
+                    f"You were marked as a no-show for your appointment on "
+                    f"{appointment.scheduled_at[:16].replace('T', ' ')}. "
+                    f"Please contact us to reschedule."
+                ),
+                "related_entity_type": "appointment",
+                "related_entity_id": appointment.appointment_id,
+            }])
 
     try:
         db.commit()

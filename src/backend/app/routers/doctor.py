@@ -166,6 +166,22 @@ def update_appointment_status(
     elif payload.status == "Completed":
         # REQ-02: Create satisfaction survey + deferred notification schedule
         create_survey_for_appointment(db, appointment)
+    elif payload.status == "NoShow":
+        # REQ-02: Notify the patient that they were marked as a no-show
+        patient = db.get(Patient, appointment.patient_id)
+        if patient:
+            create_notifications(db, [{
+                "recipient_user_id": patient.user_id,
+                "event_type": "appointment_noshow",
+                "title": "Appointment No-Show",
+                "body": (
+                    f"You were marked as a no-show for your appointment on "
+                    f"{appointment.scheduled_at[:16].replace('T', ' ')}. "
+                    f"Please contact us to reschedule."
+                ),
+                "related_entity_type": "appointment",
+                "related_entity_id": appointment.appointment_id,
+            }])
 
     db.commit()
     return {"appointment_id": appointment.appointment_id, "status": appointment.status}

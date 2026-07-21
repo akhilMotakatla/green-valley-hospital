@@ -104,7 +104,7 @@ async def create_result(
     if patient:
         lab_notif_events.append({
             "recipient_user_id": patient.user_id,
-            "event_type": "lab_result_finalized",
+            "event_type": "lab_result_ready",
             "title": "Lab Result Ready",
             "body": f"Your {order.test_type} lab result is now available.",
             "related_entity_type": "lab_result",
@@ -113,7 +113,7 @@ async def create_result(
     if ordering_doctor:
         lab_notif_events.append({
             "recipient_user_id": ordering_doctor.user_id,
-            "event_type": "lab_result_finalized",
+            "event_type": "lab_result_ready",
             "title": "Lab Result Finalized",
             "body": (
                 f"Lab result for {patient.user.full_name if patient else 'patient'} "
@@ -180,7 +180,7 @@ async def amend_result(
     if patient:
         amend_notif_events.append({
             "recipient_user_id": patient.user_id,
-            "event_type": "lab_result_finalized",
+            "event_type": "lab_result_ready",
             "title": "Lab Result Updated",
             "body": f"Your {order.test_type} lab result has been updated (version {next_version}).",
             "related_entity_type": "lab_result",
@@ -189,7 +189,7 @@ async def amend_result(
     if ordering_doctor:
         amend_notif_events.append({
             "recipient_user_id": ordering_doctor.user_id,
-            "event_type": "lab_result_finalized",
+            "event_type": "lab_result_ready",
             "title": "Lab Result Amended",
             "body": (
                 f"Lab result for {patient.user.full_name if patient else 'patient'} "

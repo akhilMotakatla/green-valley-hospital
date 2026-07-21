@@ -40,7 +40,7 @@ export function NotificationPanel({ onClose, onMarkAllRead }: Props) {
 
   useEffect(() => {
     setLoading(true);
-    listNotifications({ page: 1, page_size: 10 })
+    listNotifications({ page: 1, page_size: 20 })
       .then((r) => {
         setItems(r.items);
         setLoading(false);
