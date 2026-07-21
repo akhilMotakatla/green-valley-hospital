@@ -58,7 +58,7 @@ def write_audit_log(db: Session, *, actor_user_id: int, action: str, target_user
 
 
 def now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def parse_iso(value: str) -> datetime:

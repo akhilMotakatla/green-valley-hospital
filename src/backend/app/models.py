@@ -12,7 +12,7 @@ flagged in docs/api-spec.md §6 and §8 rather than silently added:
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     CheckConstraint,
@@ -31,7 +31,7 @@ from app.database import Base
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 class User(Base):
