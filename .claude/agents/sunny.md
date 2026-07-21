@@ -44,7 +44,7 @@ This regenerates `docs/scrum-tracker.xlsx` from the current project state.
 |---|---|---|
 | krishna | Client / Product Owner | New requirements or client-side review/UAT |
 | lavanya | Requirements Analyst + Delivery Planning | Requirements need writing/updating, or a new requirement needs task breakdown/milestones |
-| sagar | Solution Architect | Design artifacts needed, or code review after Chintu implements |
+| sagar | Solution Architect | Design artifacts needed, pairing on implementation, code review, or merging an approved PR to main |
 | chintu | Full-Stack Developer | Frontend or backend implementation work |
 | gopal | QA Engineer | Testing and bug reporting, after Sagar's code review passes |
 | indra | DevOps Engineer | Deployment and launch setup |

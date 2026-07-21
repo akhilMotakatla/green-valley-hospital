@@ -21,11 +21,29 @@ No agent may start implementation (Phase 6) until Phases 1–5 are complete and 
 4. **Technical Design** (Sagar) — architecture changes, API changes (`docs/api-spec.md`), database changes (`db/schema.sql`), integrations, security/scalability/performance/deployment considerations — documented, not implemented.
 5. **Task Breakdown & Delivery Plan** (Lavanya, as delivery/PM lead) — split the requirement into concrete tasks per agent (Chintu for implementation, Gopal for QA, Indra for deployment impact if any). Each task states: description, responsible agent, dependencies, priority, estimated effort, expected completion date, definition of done. Lavanya also sets the milestones for the requirement: start date, target completion date, internal review deadline, testing deadline, final acceptance deadline. Hand this plan to Sunny so the daily standups and `docs/scrum-tracker.xlsx` track progress against it.
 6. **Implementation** (Chintu) — builds against the Phase 2/3/4 artifacts and the Phase 5 task list.
-7. **Code Review** (Sagar) — before anything reaches Gopal, Sagar reviews Chintu's actual changes against `docs/architecture.md`, `db/schema.sql`, `docs/api-spec.md`, and the Phase 3 UX spec: does the implementation match the design, are API contracts honored exactly (field names, shapes, status codes), any architectural or security concerns. Sagar sends findings back to Chintu for fixes and re-reviews until it passes — QA time shouldn't be spent catching design-conformance issues that a review would catch faster.
+7. **Code Review** (Sagar) — before anything reaches Gopal, Sagar reviews the actual changes (Chintu's branch, or his own if he paired on implementation) against `docs/architecture.md`, `db/schema.sql`, `docs/api-spec.md`, and the Phase 3 UX spec: does the implementation match the design, are API contracts honored exactly (field names, shapes, status codes), any architectural or security concerns. Sagar sends findings back for fixes and re-reviews until it passes — QA time shouldn't be spent catching design-conformance issues that a review would catch faster.
 8. **QA** (Gopal) — tests against Phase 2's acceptance criteria and Phase 4's API contract, only once Phase 7 has passed.
 9. **Deployment** (Indra) — only once Gopal passes.
 
 Only after Phase 5's plan exists does implementation (Chintu) begin. Only after Phase 7 passes does QA (Gopal) begin. Indra only runs once Gopal passes.
+
+## Git workflow
+
+The project lives at `https://github.com/akhilMotakatla/green-valley-hospital` (`origin`, branch `main`). This is a real, standalone repo — don't confuse it with any other git repo that might exist further up the folder tree.
+
+**Sagar is the sole merge gatekeeper.** Only Sagar merges into `main`. Chintu (and Sagar himself, when pairing on implementation) work on branches and open PRs, but never merge their own work.
+
+- **Small fixes not tied to a Krishna requirement** (typos, one-line bugs, config tweaks): Chintu may commit and push directly to `main`.
+- **Any requirement that went through the phase gate**: implementation happens on a personal branch, never directly on `main`.
+  1. Before starting, `git checkout main && git pull` — someone (Sagar) may have merged other work since you last synced.
+  2. Branch off up-to-date `main`: Chintu uses `feature/chintu-<short-slug>`, Sagar uses `feature/sagar-<short-slug>` when he's picking up implementation because Chintu has too much in flight (slug derived from the requirement title, e.g. `feature/chintu-patient-lab-result-notifications`).
+  3. Commit as you go with descriptive messages referencing the requirement (e.g. `feat: notify patient when lab result is ready`). Don't squash everything into one giant commit if the work has natural checkpoints. Push the branch regularly, not just at the end (`git push -u origin <branch>` first time, `git push` after).
+  4. Open a PR into `main`: `gh pr create --title "..." --body "..."` — the body should summarize what changed and link back to the relevant section of `docs/requirements.md`.
+  5. Sagar does Phase 7 code review directly on the PR — reviews the actual diff (`gh pr diff`, `gh pr view`) and leaves findings as PR review comments (`gh pr review --request-changes --body "..."` or `--comment`), not just chat. If it's his own branch, he still reviews it critically before moving on rather than skipping self-review. Once satisfied: `gh pr review --approve`.
+  6. Only after Sagar's approval does the branch go to Gopal for Phase 8 QA. If Gopal finds bugs, whoever owns the branch fixes them and pushes updates — no new branch needed unless scope changed materially. Sagar re-reviews if the fix is non-trivial.
+  7. Once QA passes, **Sagar merges** (`gh pr merge --squash --delete-branch`) into `main` — this is his call alone, not Chintu's or Akhil's. Indra's Phase 9 deployment work always targets `main`.
+- Never force-push `main`. Never commit secrets (`.env`, real credentials) — the `.gitignore` already excludes the usual suspects; if a task genuinely needs a new kind of secret, add the pattern to `.gitignore` rather than committing it once and cleaning up later.
+- If two agents need to touch the same area concurrently, say so in your before-work report so Akhil can sequence them rather than creating merge conflicts.
 
 ## Cross-agent notification rules
 
