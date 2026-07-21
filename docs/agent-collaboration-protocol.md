@@ -6,6 +6,8 @@ Single source of truth for how the Green Valley Hospital SDLC team moves a requi
 
 Krishna (client / product owner) is the source of new requirements. Krishna does not implement anything. Each requirement Krishna raises — whether from the daily "Krishna, start" cycle or an ad-hoc client request — must clear all phases below before any code is written, and code doesn't reach QA until it clears code review too.
 
+**A "Krishna, start" cycle produces a minimum of 10 requirements in one sitting**, not one. See "Batch handling of a Krishna cycle" below for how that many requirements move through the gate without each one re-running the full pipeline in isolation.
+
 ## The phase gate
 
 No agent may start implementation (Phase 6) until Phases 1–5 are complete and their artifacts exist on disk. No work reaches Gopal until Phase 7 (Code Review) has passed. Akhil enforces this ordering when orchestrating; if invoked directly, an implementing agent (Chintu) should check that the phase artifacts it needs already exist and ask for them if not, rather than guessing.
@@ -26,6 +28,26 @@ No agent may start implementation (Phase 6) until Phases 1–5 are complete and 
 9. **Deployment** (Indra) — only once Gopal passes.
 
 Only after Phase 5's plan exists does implementation (Chintu) begin. Only after Phase 7 passes does QA (Gopal) begin. Indra only runs once Gopal passes.
+
+## Batch handling of a Krishna cycle (10+ requirements at once)
+
+Running Phases 1–5 independently for 10 separate requirements would mean 10 redundant analysis passes, 10 redundant design docs, 10 redundant planning sessions — wasteful and not how a real team would do it. Instead:
+
+- **Phases 1–5 run once per cycle, across the whole batch.** Lavanya leads one collaborative Phase 1 analysis session covering all 10+ requirements together (still gathering Sagar/Sunny/Akhil's input per requirement, but as one working session, not ten). Phase 2 documentation, Phase 3/4 design, and Phase 5 task breakdown likewise cover the full batch in their normal single documents (`docs/requirements.md`, `docs/architecture.md`, `db/schema.sql`, `docs/api-spec.md`) — each requirement gets its own clearly delineated section, but the docs aren't forked per requirement.
+- **Phase 5's output is one combined task list** spanning all 10+ requirements, with Lavanya setting priority and sequence across the whole batch — not just within each requirement. Dependencies between requirements (e.g. one needs a schema change another also touches) must be called out explicitly here so sequencing avoids conflicts.
+- **Phases 6–9 (implementation onward) execute the task list one task at a time, strictly sequentially — never in parallel.** This is deliberate: the point is that agents actually hand off to each other and communicate, not that throughput is maximized. Chintu (or Sagar, if pairing) finishes and hands off a task before the next task starts, even if the next task belongs to a different requirement or a different agent. Akhil enforces this ordering and does not invoke two implementation-stage agents concurrently within a cycle.
+- If a later requirement in the batch turns out to conflict with an earlier one once real implementation starts (rare, but possible — e.g. two requirements assumed different shapes for the same table), stop and flag it back through Lavanya rather than quietly improvising a resolution; it may need the design docs corrected before continuing.
+
+## Communication logging
+
+Every agent-to-agent communication during a Krishna cycle — before/during/after reports, handoffs, review findings, questions back to Krishna — gets logged to a single running transcript file for that cycle, not just relayed in chat and forgotten.
+
+- **Folder**: `communication/` at the project root (create it if it doesn't exist).
+- **Filename**: the date and time the cycle started, in `YYYY-MM-DD_HH-MM-SS.md` format (colons aren't valid in Windows filenames, so use hyphens — e.g. `2026-07-20_09-15-42.md`). One file per Krishna cycle (or per standalone requirement worked outside a cycle) — not one file per message.
+- **Who creates it**: Krishna creates the file at the very start of a "Krishna, start" cycle, with a header naming the cycle's date and listing the 10+ requirement titles. For a requirement raised ad hoc (outside a full cycle), whichever agent starts Phase 1 creates it.
+- **Who writes to it**: every agent that participates appends its own before/during/after entries as it does its work — in the same sequential order the work actually happens in, since agents work one at a time. Format each entry with a `##` heading naming the agent, the phase/task, and a timestamp, e.g. `## Sagar — Phase 4 Technical Design — 09:42`. Append, never overwrite or delete another agent's entries.
+- Akhil (orchestrator) reads this file to confirm each agent actually logged its handoff before invoking the next one — if an agent's entry is missing, that's a signal the handoff didn't really happen and Akhil should ask for it before proceeding.
+- These logs are real project artifacts — commit them to git along with everything else, they're useful history of how a requirement actually moved through the team.
 
 ## Git workflow
 
@@ -57,7 +79,7 @@ An agent that changes something another agent depends on must say so, not assume
 
 ## Required reporting: before / during / after
 
-Every agent doing gate-stage work (Lavanya's analysis/documentation/planning, Sagar's design and code review, Chintu's build, Gopal's testing, Indra's deployment, Sunny's/Akhil's analysis input) reports at three points, either to Akhil (if orchestrated) or directly in its final response (if invoked standalone):
+Every agent doing gate-stage work (Lavanya's analysis/documentation/planning, Sagar's design and code review, Chintu's build, Gopal's testing, Indra's deployment, Sunny's/Akhil's analysis input) reports at three points. During a Krishna cycle, this means an entry appended to the cycle's `communication/<timestamp>.md` file (see Communication logging above); outside a cycle, report to Akhil (if orchestrated) or directly in your final response (if invoked standalone):
 
 **Before work starts**
 - What I understand the task to be

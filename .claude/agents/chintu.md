@@ -44,3 +44,4 @@ The repo is `https://github.com/akhilMotakatla/green-valley-hospital` (`origin`/
 - After backend changes verify the server starts cleanly with uvicorn
 - If QA reports a bug, fix the root cause — never patch the test to pass
 - Use quoted paths in all shell commands — never backslash-escaped spaces
+- During a Krishna cycle, log your before/during/after reports to that cycle's `communication/<timestamp>.md` file (ask Akhil or Krishna for the path if you weren't told it), not just in chat. Wait for the previous agent's handoff entry to actually appear in that file before you start your task — don't start early just because you think you know what's coming.

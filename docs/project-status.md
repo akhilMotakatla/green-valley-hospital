@@ -48,6 +48,8 @@ Standalone repo (not part of any parent folder's git history): **https://github.
 
 Krishna (client/product owner) → collaborative Phase 1 analysis (Akhil + Sagar + Lavanya + Sunny, Lavanya leads/consolidates) → Lavanya documents (`docs/requirements.md`) → Sagar designs UX + technical (`docs/architecture.md`, `db/schema.sql`, `docs/api-spec.md`) → Lavanya breaks into tasks/milestones → Chintu (or Sagar) implements on a branch → Sagar code-reviews the PR → Gopal QA's it → Sagar merges → Indra handles deployment/launch config. Sunny runs daily standups tracking Lavanya's milestones. Full detail (including the before/during/after reporting convention and cross-agent notification rules) is in `docs/agent-collaboration-protocol.md` — read that once per task type, not this summary alone, when you're actually doing gate-stage work.
 
+**A "Krishna, start" cycle produces a minimum of 10 requirements at once**, not one — Phases 1–5 run once across the whole batch, then Phase 6 onward executes the resulting combined task list one task at a time, strictly sequentially (never in parallel), so real agent-to-agent handoffs happen. Every agent-to-agent communication during a cycle is logged to `communication/<YYYY-MM-DD_HH-MM-SS>.md` (one file per cycle, created by Krishna at the start, appended to by every participating agent in order) — see "Communication logging" in `docs/agent-collaboration-protocol.md`.
+
 Krishna keeps her own no-repeat history in `docs/krishna-daily-requirements-log.md` — she checks that before proposing anything in a "Krishna, start" cycle, not this file, though this file gives her the current product baseline to reason from.
 
 ## Known state / what's NOT done
@@ -55,12 +57,13 @@ Krishna keeps her own no-repeat history in `docs/krishna-daily-requirements-log.
 - No CI/CD, no Docker, no cloud deployment — local dev run only (`docs/deployment-guide.md`).
 - `docs/luxury-redesign-requirements.md` is superseded (see above) — don't implement from it.
 - Authenticated portal UI has not received the dark/glassmorphism treatment — still on original functional styling.
-- No requirement has yet gone through the full Krishna → five-phase-gate → PR → merge cycle end to end as a live test of the new process (the process itself was just set up). The next new requirement is a good candidate to validate the whole pipeline including the git workflow.
+- No requirement has yet gone through the full Krishna → phase-gate → PR → merge cycle end to end as a live test of the new process (the process itself was just set up). The next "Krishna, start" cycle is the first real test of the whole pipeline including the batch model, sequential task execution, communication logging, and the git workflow.
 
 ## Changelog
 
 Newest first. Keep entries short — a sentence or two, dated, what changed and by whom (or "user-directed" if done in direct conversation rather than via an agent invocation).
 
+- **2026-07-20** — Krishna's cycle changed from "1 requirement per cycle" to "minimum 10 requirements per cycle, run as a batch." Phases 1–5 now run once across the whole batch instead of once per requirement; Phase 6 onward executes the resulting task list strictly one task at a time (never in parallel), so real handoffs happen. New `communication/` folder: one timestamped file per cycle, every participating agent appends its before/during/after reports there in order. All 8 agent definitions and `docs/agent-collaboration-protocol.md` updated accordingly.
 - **2026-07-20** — GitHub repo created (`akhilMotakatla/green-valley-hospital`), git/PR workflow established (Chintu + Sagar branches, Sagar sole merge gatekeeper). Agent team expanded: Krishna (client) added, Lavanya gained PM/delivery-planning duties, Phase 1 requirement analysis made collaborative (Akhil/Sagar/Lavanya/Sunny), Phase 7 code review (Sagar) added between implementation and QA. This memory system (`docs/project-status.md`, this file) established.
 - **2026-07-20** — Dark cinematic + glassmorphism redesign of the entire public site (superseding the light teal/gold "luxury" theme). Full-screen hero rebuilt in `MosaicHero.tsx`. Fixed a real mobile overflow bug (hero CTA button clipped under a fixed-height card) found during browser verification.
 - **2026-07-20** — Seed data expanded from 4 to 10 departments, 4 to 10 doctors, 3 to 8 blog articles (user-directed, "more content, screen filled up"). Fixed a hard-coded `.limit(4)` cap in `GET /api/public/home` that was the real bottleneck. Corrected several department images that were visually mismatched to their labels in the original doc (e.g. "pediatrics" pointed to a brain model photo, "ophthalmology" pointed to a beach photo).

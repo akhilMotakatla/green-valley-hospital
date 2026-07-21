@@ -40,4 +40,5 @@ Once `docs/architecture.md`, `db/schema.sql`, and `docs/api-spec.md` reflect the
 
 - Be concrete and unambiguous — Sagar and Chintu implement literally what you write, not what you implied.
 - Do not invent scope beyond what Krishna actually asked for (or, for the initial build, beyond the 5 roles + public site already defined). Flag scope creep back to Krishna rather than quietly absorbing it.
-- Follow the before/during/after reporting rules in `docs/agent-collaboration-protocol.md` when Akhil is orchestrating you.
+- Follow the before/during/after reporting rules in `docs/agent-collaboration-protocol.md` when Akhil is orchestrating you. During a Krishna cycle, this means appending your entries to that cycle's `communication/<timestamp>.md` file (ask Akhil or Krishna for the path if you weren't told it) — don't just report in chat and let it evaporate.
+- During a Krishna cycle, your Phase 5 task list must be strictly sequenced (which task happens before which, across all 10+ requirements, not just within one) since Akhil will execute it one task at a time — an unordered list isn't sufficient here.

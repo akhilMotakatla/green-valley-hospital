@@ -34,6 +34,15 @@ A requirement from Krishna must clear all phases below — in order, each with a
 
 For the *initial* build of the project (no existing requirements yet), Phase 1 collapses into Lavanya gathering baseline requirements directly rather than analyzing a specific Krishna requirement — that's fine, use judgment; the collaborative gate matters most for iterative changes to a system that already exists and has real users depending on it.
 
+## Running a Krishna cycle (batch of 10+ requirements)
+
+Krishna hands you 10+ requirements in one go, not one at a time. Read `docs/agent-collaboration-protocol.md`'s "Batch handling of a Krishna cycle" section for the full model; the short version:
+
+- Phases 1–5 run once, covering the whole batch — one Lavanya-led analysis session, one documentation pass, one design pass, one combined task list with priority/sequence across all 10+ requirements.
+- Phase 5's task list is what you actually execute against. **Work it one task at a time, strictly sequentially — never invoke two implementation-stage agents concurrently within a cycle**, even across different requirements in the batch. This is intentional: the goal is real handoffs and communication between agents, not throughput.
+- Before invoking the next agent for the next task, check the current cycle's `communication/<timestamp>.md` file (Krishna creates it at cycle start) and confirm the previous agent actually appended their after-work entry. If it's missing, that handoff didn't really happen — go get it before proceeding, don't just move on because the work itself looks done.
+- Tell every agent you invoke during a cycle which communication log file to append to, so they don't create a new one or skip logging.
+
 ## Your responsibilities
 
 - Before invoking a stage, read the artifact(s) the previous stage produced so you can brief the next agent with concrete context (file paths, key decisions) rather than vague instructions.
@@ -42,7 +51,7 @@ For the *initial* build of the project (no existing requirements yet), Phase 1 c
 - If Sagar's code review (Phase 7) finds issues, route them back to Chintu and re-review before Gopal ever sees the work.
 - If Gopal reports failing tests or bugs, route those findings back to Chintu, re-run code review if the fix is non-trivial, and re-run QA after the fix — do not proceed to Indra's stage with known failures.
 - Relay each stage's before/during/after report (per `docs/agent-collaboration-protocol.md`) to the user in short status updates — not a full transcript of each subagent's work.
-- Use the project's TaskList to track stage status.
+- Use the project's TaskList to track stage status — with 10+ requirements and a strictly sequential task list, this is where you keep track of what's done, what's next, and what's blocked.
 
 ## What you must not do
 

@@ -52,3 +52,4 @@ Full detail in `docs/agent-collaboration-protocol.md`. The short version: you ar
 - Keep the schema and API spec's field naming consistent (e.g. don't call it `patient_id` in SQL and `patientId`/`pid` inconsistently across endpoints — pick one convention, snake_case for JSON is fine, and document it).
 - In Phases 3/4, design only — no `.py`/`.tsx` files unless you're explicitly pairing on implementation per above.
 - When reviewing someone else's branch, send findings back rather than silently fixing it yourself, so the original author stays the owner of their implementation and learns from the feedback loop. When it's your own branch, this doesn't apply — just fix it directly.
+- During a Krishna cycle, log your before/during/after reports to that cycle's `communication/<timestamp>.md` file (ask Akhil or Krishna for the path if you weren't told it), not just in chat.
