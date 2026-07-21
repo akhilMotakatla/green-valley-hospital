@@ -251,6 +251,36 @@ def cancel_my_appointment(appointment_id: int, current_user: User = Depends(requ
         )
 
     appointment.status = "Cancelled"
+
+    # REQ-02: Notify patient + doctor about cancellation
+    doctor = db.get(Doctor, appointment.doctor_id)
+    cancel_events: list[dict] = [
+        {
+            "recipient_user_id": current_user.id,
+            "event_type": "appointment_cancelled",
+            "title": "Appointment Cancelled",
+            "body": (
+                f"Your appointment on "
+                f"{appointment.scheduled_at[:16].replace('T', ' ')} has been cancelled."
+            ),
+            "related_entity_type": "appointment",
+            "related_entity_id": appointment.appointment_id,
+        }
+    ]
+    if doctor:
+        cancel_events.append({
+            "recipient_user_id": doctor.user_id,
+            "event_type": "appointment_cancelled",
+            "title": "Appointment Cancelled",
+            "body": (
+                f"Appointment with {current_user.full_name} on "
+                f"{appointment.scheduled_at[:16].replace('T', ' ')} has been cancelled by the patient."
+            ),
+            "related_entity_type": "appointment",
+            "related_entity_id": appointment.appointment_id,
+        })
+    create_notifications(db, cancel_events)
+
     db.commit()
     return {"appointment_id": appointment.appointment_id, "status": appointment.status}
 

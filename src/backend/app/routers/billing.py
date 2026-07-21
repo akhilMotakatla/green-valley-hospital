@@ -32,6 +32,7 @@ from app.models import (
 )
 from app.schemas import BillingInvoiceCreateRequest, BillingInvoicePatchRequest
 from app.services.email_sink import send_invoice_notification
+from app.services.notification_service import create_notifications
 from app.utils import dumps, loads, now_iso, paginate, total_pages
 
 router = APIRouter(
@@ -252,6 +253,18 @@ def create_invoice(
             status="Pending",
             trigger_event="invoice_status_change",
         )
+        # REQ-02: In-app notification for patient
+        create_notifications(db, [{
+            "recipient_user_id": patient.user_id,
+            "event_type": "invoice_created",
+            "title": "New Invoice",
+            "body": (
+                f"A new invoice of ${payload.total_amount_cents / 100:,.2f} "
+                f"has been created for your account."
+            ),
+            "related_entity_type": "invoice",
+            "related_entity_id": inv.invoice_id,
+        }])
 
     db.commit()
     db.refresh(inv)
@@ -284,7 +297,7 @@ def update_invoice(
     if payload.total_amount_cents is not None:
         inv.total_amount_cents = payload.total_amount_cents
 
-    # Trigger email notification if status changed (NOTIFY-1..3).
+    # Trigger email + in-app notification if status changed (NOTIFY-1..3).
     if status_changed:
         patient = db.get(Patient, inv.patient_id)
         if patient is not None:
@@ -300,6 +313,18 @@ def update_invoice(
                 status=inv.status,
                 trigger_event="invoice_status_change",
             )
+            # REQ-02: In-app notification for patient
+            create_notifications(db, [{
+                "recipient_user_id": patient.user_id,
+                "event_type": "invoice_status_changed",
+                "title": f"Invoice {inv.status}",
+                "body": (
+                    f"Your invoice of ${inv.total_amount_cents / 100:,.2f} "
+                    f"has been updated to: {inv.status}."
+                ),
+                "related_entity_type": "invoice",
+                "related_entity_id": inv.invoice_id,
+            }])
 
     db.commit()
     db.refresh(inv)

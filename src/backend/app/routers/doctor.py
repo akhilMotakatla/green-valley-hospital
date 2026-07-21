@@ -10,6 +10,7 @@ from app.models import (
     Doctor,
     LabOrder,
     LabResult,
+    LabTechnician,
     Patient,
     Prescription,
     User,
@@ -22,6 +23,7 @@ from app.schemas import (
     PrescriptionCreateRequest,
     VisitNoteCreateRequest,
 )
+from app.services.notification_service import create_notifications, create_survey_for_appointment
 from app.utils import dumps, loads, paginate, total_pages, write_audit_log
 
 router = APIRouter(prefix="/doctor", tags=["doctor"], dependencies=[Depends(require_role("Doctor"))])
@@ -131,6 +133,40 @@ def update_appointment_status(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your appointment")
 
     appointment.status = payload.status
+
+    # REQ-02: Fan-out notifications on status transitions
+    if payload.status == "Cancelled":
+        patient = db.get(Patient, appointment.patient_id)
+        notif_events: list[dict] = [
+            {
+                "recipient_user_id": current_user.id,
+                "event_type": "appointment_cancelled",
+                "title": "Appointment Cancelled",
+                "body": (
+                    f"Appointment on {appointment.scheduled_at[:16].replace('T', ' ')} "
+                    f"has been cancelled."
+                ),
+                "related_entity_type": "appointment",
+                "related_entity_id": appointment.appointment_id,
+            }
+        ]
+        if patient:
+            notif_events.append({
+                "recipient_user_id": patient.user_id,
+                "event_type": "appointment_cancelled",
+                "title": "Appointment Cancelled",
+                "body": (
+                    f"Your appointment on {appointment.scheduled_at[:16].replace('T', ' ')} "
+                    f"has been cancelled."
+                ),
+                "related_entity_type": "appointment",
+                "related_entity_id": appointment.appointment_id,
+            })
+        create_notifications(db, notif_events)
+    elif payload.status == "Completed":
+        # REQ-02: Create satisfaction survey + deferred notification schedule
+        create_survey_for_appointment(db, appointment)
+
     db.commit()
     return {"appointment_id": appointment.appointment_id, "status": appointment.status}
 
@@ -267,6 +303,27 @@ def create_lab_order(
         notes=payload.notes,
     )
     db.add(order)
+    db.flush()  # get order_id before notification fan-out
+
+    # REQ-02: Notify all active Lab users about the new order
+    patient = db.get(Patient, patient_id)
+    patient_name = patient.user.full_name if patient else "a patient"
+    lab_users = db.query(User).filter(User.role == "Lab", User.is_active == 1).all()
+    lab_events: list[dict] = [
+        {
+            "recipient_user_id": u.id,
+            "event_type": "lab_order_assigned",
+            "title": "New Lab Order",
+            "body": (
+                f"A new {order.test_type} lab order has been assigned for {patient_name}."
+            ),
+            "related_entity_type": "lab_order",
+            "related_entity_id": order.order_id,
+        }
+        for u in lab_users
+    ]
+    create_notifications(db, lab_events)
+
     db.commit()
     db.refresh(order)
     return {

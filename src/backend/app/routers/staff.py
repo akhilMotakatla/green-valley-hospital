@@ -265,10 +265,42 @@ def update_appointment(appointment_id: int, payload: StaffAppointmentUpdateReque
         appointment.scheduled_at = payload.scheduled_at
     if payload.doctor_id is not None:
         appointment.doctor_id = payload.doctor_id
+    prev_status = appointment.status
     if payload.status is not None:
         appointment.status = payload.status
     if payload.reason is not None:
         appointment.reason = payload.reason
+
+    # REQ-02: Notify patient + doctor when staff cancels an appointment
+    if payload.status == "Cancelled" and prev_status != "Cancelled":
+        patient = db.get(Patient, appointment.patient_id)
+        doctor = db.get(Doctor, appointment.doctor_id)
+        cancel_events: list[dict] = []
+        if patient:
+            cancel_events.append({
+                "recipient_user_id": patient.user_id,
+                "event_type": "appointment_cancelled",
+                "title": "Appointment Cancelled",
+                "body": (
+                    f"Your appointment on {appointment.scheduled_at[:16].replace('T', ' ')} "
+                    f"has been cancelled."
+                ),
+                "related_entity_type": "appointment",
+                "related_entity_id": appointment.appointment_id,
+            })
+        if doctor:
+            cancel_events.append({
+                "recipient_user_id": doctor.user_id,
+                "event_type": "appointment_cancelled",
+                "title": "Appointment Cancelled",
+                "body": (
+                    f"Appointment on {appointment.scheduled_at[:16].replace('T', ' ')} "
+                    f"has been cancelled by front desk staff."
+                ),
+                "related_entity_type": "appointment",
+                "related_entity_id": appointment.appointment_id,
+            })
+        create_notifications(db, cancel_events)
 
     try:
         db.commit()
