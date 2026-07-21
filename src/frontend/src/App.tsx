@@ -19,6 +19,7 @@ import { UnauthorizedPage } from './pages/shared/UnauthorizedPage';
 import { NotFoundPage } from './pages/shared/NotFoundPage';
 
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
+import { AdminDoctorAvailabilityPage } from './pages/admin/AdminDoctorAvailabilityPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminDepartmentsPage } from './pages/admin/AdminDepartmentsPage';
 import { AdminAppointmentsPage } from './pages/admin/AdminAppointmentsPage';
@@ -28,6 +29,7 @@ import { AdminContactMessagesPage } from './pages/admin/AdminContactMessagesPage
 import { AdminAuditLogPage } from './pages/admin/AdminAuditLogPage';
 
 import { DoctorAppointmentsPage } from './pages/doctor/DoctorAppointmentsPage';
+import { DoctorAvailabilityPage } from './pages/doctor/DoctorAvailabilityPage';
 import { DoctorPatientRecordsPage } from './pages/doctor/DoctorPatientRecordsPage';
 import { DoctorProfilePage } from './pages/doctor/DoctorProfilePage';
 
@@ -83,6 +85,7 @@ function App() {
           >
             <Route path="/admin" element={<AdminDashboardPage />} />
             <Route path="/admin/users" element={<AdminUsersPage />} />
+            <Route path="/admin/users/:userId/availability" element={<AdminDoctorAvailabilityPage />} />
             <Route path="/admin/departments" element={<AdminDepartmentsPage />} />
             <Route path="/admin/appointments" element={<AdminAppointmentsPage />} />
             <Route path="/admin/invoices" element={<AdminInvoicesPage />} />
@@ -100,6 +103,7 @@ function App() {
             }
           >
             <Route path="/doctor" element={<DoctorAppointmentsPage />} />
+            <Route path="/doctor/availability" element={<DoctorAvailabilityPage />} />
             <Route path="/doctor/patients/:patientId" element={<DoctorPatientRecordsPage />} />
             <Route path="/doctor/profile" element={<DoctorProfilePage />} />
           </Route>

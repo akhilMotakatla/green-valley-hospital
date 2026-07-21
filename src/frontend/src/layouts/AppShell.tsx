@@ -15,6 +15,7 @@ import {
   LogOut,
   Bell,
   CalendarPlus,
+  CalendarClock,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { Logo } from '../components/Logo';
@@ -37,8 +38,9 @@ const navByRole: Record<string, NavItem[]> = {
     { to: '/admin/audit-log',         label: 'Audit Log',        icon: <ClipboardList size={16} /> },
   ],
   Doctor: [
-    { to: '/doctor',         label: 'Appointments', icon: <CalendarCheck size={16} /> },
-    { to: '/doctor/profile', label: 'My Profile',   icon: <UserCircle size={16} /> },
+    { to: '/doctor',              label: 'Appointments', icon: <CalendarCheck size={16} /> },
+    { to: '/doctor/availability', label: 'Schedule',     icon: <CalendarClock size={16} /> },
+    { to: '/doctor/profile',      label: 'My Profile',   icon: <UserCircle size={16} /> },
   ],
   Patient: [
     { to: '/patient',          label: 'My Appointments', icon: <CalendarCheck size={16} /> },
