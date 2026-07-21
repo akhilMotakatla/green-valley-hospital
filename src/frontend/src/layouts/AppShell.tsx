@@ -19,6 +19,7 @@ import {
   Clock,
   Settings,
   Star,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { Logo } from '../components/Logo';
@@ -41,22 +42,26 @@ const navByRole: Record<string, NavItem[]> = {
     { to: '/admin/contact-messages',  label: 'Contact Messages', icon: <MessageSquare size={16} /> },
     { to: '/admin/audit-log',         label: 'Audit Log',        icon: <ClipboardList size={16} /> },
     { to: '/admin/surveys',           label: 'Surveys',          icon: <Star size={16} /> },
+    { to: '/admin/referrals',         label: 'Referrals',        icon: <ArrowRightLeft size={16} /> },
+    { to: '/admin/corporate',         label: 'Corporate',        icon: <Building2 size={16} /> },
     { to: '/admin/config',            label: 'Configuration',    icon: <Settings size={16} /> },
   ],
   Doctor: [
     { to: '/doctor',              label: 'Appointments', icon: <CalendarCheck size={16} /> },
     { to: '/doctor/availability', label: 'Schedule',     icon: <CalendarClock size={16} /> },
+    { to: '/doctor/referrals',    label: 'Referrals',    icon: <ArrowRightLeft size={16} /> },
     { to: '/doctor/profile',      label: 'My Profile',   icon: <UserCircle size={16} /> },
     { to: '/doctor/ratings',      label: 'My Ratings',   icon: <Star size={16} /> },
   ],
   Patient: [
-    { to: '/patient',          label: 'My Appointments', icon: <CalendarCheck size={16} /> },
-    { to: '/patient/book',     label: 'Book Appointment', icon: <CalendarPlus size={16} /> },
-    { to: '/patient/records',  label: 'My Records',       icon: <FileText size={16} /> },
-    { to: '/patient/invoices', label: 'My Billing',       icon: <Receipt size={16} /> },
-    { to: '/patient/profile',   label: 'My Profile',       icon: <UserCircle size={16} /> },
-    { to: '/patient/waitlist',  label: 'Waitlist',         icon: <Clock size={16} /> },
-    { to: '/patient/surveys',   label: 'My Surveys',       icon: <Star size={16} /> },
+    { to: '/patient',             label: 'My Appointments', icon: <CalendarCheck size={16} /> },
+    { to: '/patient/book',        label: 'Book Appointment', icon: <CalendarPlus size={16} /> },
+    { to: '/patient/records',     label: 'My Records',       icon: <FileText size={16} /> },
+    { to: '/patient/invoices',    label: 'My Billing',       icon: <Receipt size={16} /> },
+    { to: '/patient/profile',     label: 'My Profile',       icon: <UserCircle size={16} /> },
+    { to: '/patient/waitlist',    label: 'Waitlist',         icon: <Clock size={16} /> },
+    { to: '/patient/referrals',   label: 'My Referrals',     icon: <ArrowRightLeft size={16} /> },
+    { to: '/patient/surveys',     label: 'My Surveys',       icon: <Star size={16} /> },
   ],
   Staff: [
     { to: '/staff',                   label: 'Patients',         icon: <Users size={16} /> },

@@ -16,7 +16,7 @@ called from doctor.py and staff.py when an appointment transitions to 'Cancelled
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -229,7 +229,7 @@ def confirm_waitlist_slot(
 
     # Check confirmation window
     if entry.confirmation_deadline:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         if entry.confirmation_deadline < now:
             raise HTTPException(status_code=400, detail="Confirmation window has expired")
 

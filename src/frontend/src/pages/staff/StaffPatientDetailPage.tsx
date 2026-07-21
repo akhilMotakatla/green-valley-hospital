@@ -7,12 +7,14 @@ import {
   getPatientLabResults,
   getPatientPrescriptions,
   getStaffPatient,
-  recordVitals,
 } from '../../api/staff';
+import { postVitals } from '../../api/vitals';
+import { getIntakeForm } from '../../api/intake';
 import type { StaffPatientDetail } from '../../types';
 import { extractErrorMessage } from '../../api/client';
 import { formatDateTime } from '../../utils/format';
 import { StatusBadge } from '../../components/StatusBadge';
+import { CheckCircle, Clock } from 'lucide-react';
 
 export function StaffPatientDetailPage() {
   const { patientId } = useParams();
@@ -21,17 +23,34 @@ export function StaffPatientDetailPage() {
   const [labResults, setLabResults] = useState<unknown[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // REQ-03: Intake form statuses per appointment
+  const [intakeStatuses, setIntakeStatuses] = useState<Record<number, boolean | null>>({});
+
+  // REQ-04 Vitals fields (new schema: separate BP columns)
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
-  const [bp, setBp] = useState('');
+  const [systolic, setSystolic] = useState('');
+  const [diastolic, setDiastolic] = useState('');
   const [temp, setTemp] = useState('');
   const [pulse, setPulse] = useState('');
   const [vitalsMsg, setVitalsMsg] = useState<string | null>(null);
+  const [vitalsError, setVitalsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!patientId) return;
     getStaffPatient(Number(patientId))
-      .then(setPatient)
+      .then((p) => {
+        setPatient(p);
+        // REQ-03: Load intake status for each upcoming appointment
+        p.upcoming_appointments.forEach((a) => {
+          getIntakeForm(a.appointment_id)
+            .then((form) => {
+              const submitted = form?.submitted_at != null;
+              setIntakeStatuses((prev) => ({ ...prev, [a.appointment_id]: submitted }));
+            })
+            .catch(() => setIntakeStatuses((prev) => ({ ...prev, [a.appointment_id]: null })));
+        });
+      })
       .catch((e) => setError(extractErrorMessage(e)));
     getPatientPrescriptions(Number(patientId))
       .then((r) => setPrescriptions((r as { items?: unknown[] }).items ?? []))
@@ -44,23 +63,33 @@ export function StaffPatientDetailPage() {
   async function handleVitals(e: FormEvent) {
     e.preventDefault();
     setVitalsMsg(null);
+    setVitalsError(null);
     if (!patientId) return;
+
+    // Client-side BP both-or-neither
+    if ((systolic && !diastolic) || (!systolic && diastolic)) {
+      setVitalsError('Both Systolic BP and Diastolic BP must be provided together.');
+      return;
+    }
+
     try {
-      await recordVitals(Number(patientId), {
+      await postVitals(Number(patientId), {
         height_cm: height ? Number(height) : undefined,
         weight_kg: weight ? Number(weight) : undefined,
-        blood_pressure: bp || undefined,
-        temperature_c: temp ? Number(temp) : undefined,
+        systolic_bp: systolic ? Number(systolic) : undefined,
+        diastolic_bp: diastolic ? Number(diastolic) : undefined,
+        temperature_celsius: temp ? Number(temp) : undefined,
         pulse_bpm: pulse ? Number(pulse) : undefined,
       });
-      setVitalsMsg('Vitals recorded.');
+      setVitalsMsg('Vitals recorded successfully.');
       setHeight('');
       setWeight('');
-      setBp('');
+      setSystolic('');
+      setDiastolic('');
       setTemp('');
       setPulse('');
     } catch (err) {
-      setVitalsMsg(extractErrorMessage(err));
+      setVitalsError(extractErrorMessage(err));
     }
   }
 
@@ -91,6 +120,7 @@ export function StaffPatientDetailPage() {
               <th>Scheduled</th>
               <th>Reason</th>
               <th>Status</th>
+              <th>Intake Form</th>
             </tr>
           </thead>
           <tbody>
@@ -101,40 +131,59 @@ export function StaffPatientDetailPage() {
                 <td>
                   <StatusBadge status={a.status} />
                 </td>
+                <td>
+                  {intakeStatuses[a.appointment_id] === true ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--color-success, #28a745)', fontSize: '0.8rem' }}>
+                      <CheckCircle size={13} /> Submitted
+                    </span>
+                  ) : intakeStatuses[a.appointment_id] === false ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--color-warning, #f0ad4e)', fontSize: '0.8rem' }}>
+                      <Clock size={13} /> Not submitted
+                    </span>
+                  ) : (
+                    <span className="muted" style={{ fontSize: '0.8rem' }}>—</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </section>
 
+      {/* REQ-04: Record Vitals (updated to use new vitals endpoint) */}
       <section className="section card">
         <h2>Record Vitals</h2>
-        {vitalsMsg && (
-          <p className={vitalsMsg.includes('recorded') ? 'success-text' : 'error-text'}>{vitalsMsg}</p>
-        )}
+        {vitalsMsg && <p style={{ color: 'var(--color-success, #28a745)' }}>{vitalsMsg}</p>}
+        {vitalsError && <p style={{ color: 'var(--color-danger)' }}>{vitalsError}</p>}
         <form className="form" onSubmit={handleVitals}>
           <div className="form-row">
             <label>
               Height (cm)
-              <input value={height} onChange={(e) => setHeight(e.target.value)} />
+              <input type="number" step="0.1" value={height} onChange={(e) => setHeight(e.target.value)} placeholder="e.g. 170" />
             </label>
             <label>
               Weight (kg)
-              <input value={weight} onChange={(e) => setWeight(e.target.value)} />
+              <input type="number" step="0.1" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 70.5" />
             </label>
           </div>
           <div className="form-row">
             <label>
-              Blood pressure
-              <input value={bp} onChange={(e) => setBp(e.target.value)} placeholder="120/80" />
+              Systolic BP (mmHg)
+              <input type="number" value={systolic} onChange={(e) => setSystolic(e.target.value)} placeholder="e.g. 120" />
             </label>
             <label>
-              Temperature (C)
-              <input value={temp} onChange={(e) => setTemp(e.target.value)} />
+              Diastolic BP (mmHg)
+              <input type="number" value={diastolic} onChange={(e) => setDiastolic(e.target.value)} placeholder="e.g. 80" />
+            </label>
+          </div>
+          <div className="form-row">
+            <label>
+              Temperature (°C)
+              <input type="number" step="0.1" value={temp} onChange={(e) => setTemp(e.target.value)} placeholder="e.g. 37.0" />
             </label>
             <label>
               Pulse (bpm)
-              <input value={pulse} onChange={(e) => setPulse(e.target.value)} />
+              <input type="number" value={pulse} onChange={(e) => setPulse(e.target.value)} placeholder="e.g. 72" />
             </label>
           </div>
           <button className="btn btn-primary" type="submit">

@@ -14,6 +14,12 @@ from app.routers.notifications import router as notifications_router
 from app.routers.waitlist import router as waitlist_router
 from app.routers.discharge import router as discharge_router
 from app.routers.surveys import router as surveys_router
+from app.routers.intake import router as intake_router
+from app.routers.vitals import router as vitals_router
+from app.routers.referrals import router as referrals_router
+from app.routers.search import router as search_router
+from app.routers.pdf import router as pdf_router
+from app.routers.corporate import router as corporate_router
 
 app = FastAPI(title="Green Valley Hospital API")
 
@@ -67,3 +73,11 @@ app.include_router(notifications_router, prefix="/api")
 app.include_router(waitlist_router, prefix="/api")
 app.include_router(discharge_router, prefix="/api")
 app.include_router(surveys_router, prefix="/api")
+# Batch 2 Group C: intake forms (REQ-03), vitals (REQ-04), referrals (REQ-05),
+#   symptom search (REQ-07), PDF export (REQ-08), corporate packages (REQ-12)
+app.include_router(intake_router, prefix="/api")
+app.include_router(vitals_router, prefix="/api")
+app.include_router(referrals_router, prefix="/api")
+app.include_router(search_router, prefix="/api")
+app.include_router(pdf_router, prefix="/api")
+app.include_router(corporate_router, prefix="/api")

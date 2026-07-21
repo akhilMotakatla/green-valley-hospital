@@ -17,7 +17,7 @@ check_waitlist_expiry(db, user_id)
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -95,7 +95,7 @@ def trigger_next_waitlist(
         return
 
     hours = _get_confirmation_hours(db)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     deadline = now + timedelta(hours=hours)
 
     entry.status = "Notified"
@@ -130,7 +130,7 @@ def check_waitlist_expiry(db: Session, user_id: int) -> None:
     if patient is None:
         return
 
-    now_str = datetime.utcnow().isoformat()
+    now_str = datetime.now(timezone.utc).isoformat()
 
     expired_entries = (
         db.query(WaitlistEntry)

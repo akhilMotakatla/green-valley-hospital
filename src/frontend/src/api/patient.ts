@@ -75,3 +75,19 @@ export const getMyRecords = () =>
 
 export const getMyInvoices = (params: { status?: string; page?: number; page_size?: number }) =>
   apiClient.get<Paginated<Invoice>>('/patients/me/invoices', { params }).then((r) => r.data);
+
+/**
+ * REQ-08: Export patient medical records as PDF.
+ * Returns a Blob with Content-Type application/pdf.
+ */
+export const exportPDF = (startDate?: string, endDate?: string) => {
+  const params: Record<string, string> = {};
+  if (startDate) params.start_date = startDate;
+  if (endDate) params.end_date = endDate;
+  return apiClient
+    .get('/patients/me/export-pdf', {
+      params,
+      responseType: 'blob',
+    })
+    .then((r) => r.data as Blob);
+};

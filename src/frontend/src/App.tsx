@@ -18,6 +18,8 @@ import { SignupPage } from './pages/public/SignupPage';
 import { UnauthorizedPage } from './pages/shared/UnauthorizedPage';
 import { NotFoundPage } from './pages/shared/NotFoundPage';
 import { NotificationsPage } from './pages/shared/NotificationsPage';
+import { SearchPage } from './pages/public/SearchPage';
+import { CorporatePage } from './pages/public/CorporatePage';
 
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { AdminDoctorAvailabilityPage } from './pages/admin/AdminDoctorAvailabilityPage';
@@ -30,6 +32,8 @@ import { AdminContactMessagesPage } from './pages/admin/AdminContactMessagesPage
 import { AdminAuditLogPage } from './pages/admin/AdminAuditLogPage';
 import { AdminConfigPage } from './pages/admin/AdminConfigPage';
 import { AdminSurveysPage } from './pages/admin/AdminSurveysPage';
+import { AdminReferralsPage } from './pages/admin/AdminReferralsPage';
+import { AdminCorporatePage } from './pages/admin/AdminCorporatePage';
 
 import { DoctorAppointmentsPage } from './pages/doctor/DoctorAppointmentsPage';
 import { DoctorAvailabilityPage } from './pages/doctor/DoctorAvailabilityPage';
@@ -37,6 +41,7 @@ import { DoctorPatientRecordsPage } from './pages/doctor/DoctorPatientRecordsPag
 import { DoctorProfilePage } from './pages/doctor/DoctorProfilePage';
 import { DoctorRatingsPage } from './pages/doctor/DoctorRatingsPage';
 import { DoctorDischargeSummaryPage } from './pages/doctor/DoctorDischargeSummaryPage';
+import { DoctorReferralsPage } from './pages/doctor/DoctorReferralsPage';
 
 import { PatientAppointmentsPage } from './pages/patient/PatientAppointmentsPage';
 import { BookAppointmentPage } from './pages/patient/BookAppointmentPage';
@@ -46,6 +51,8 @@ import { PatientProfilePage } from './pages/patient/PatientProfilePage';
 import { PatientWaitlistPage } from './pages/patient/PatientWaitlistPage';
 import { PatientDischargeSummaryPage } from './pages/patient/PatientDischargeSummaryPage';
 import { PatientSurveysPage } from './pages/patient/PatientSurveysPage';
+import { PatientIntakeFormPage } from './pages/patient/PatientIntakeFormPage';
+import { PatientReferralsPage } from './pages/patient/PatientReferralsPage';
 
 import { StaffPatientsPage } from './pages/staff/StaffPatientsPage';
 import { StaffPatientDetailPage } from './pages/staff/StaffPatientDetailPage';
@@ -82,6 +89,8 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/unauthorized" element={<UnauthorizedPage />} />
+            <Route path="/search" element={<SearchPage />} />
+            <Route path="/corporate" element={<CorporatePage />} />
           </Route>
 
           {/* Admin */}
@@ -104,6 +113,8 @@ function App() {
             <Route path="/admin/audit-log" element={<AdminAuditLogPage />} />
             <Route path="/admin/config" element={<AdminConfigPage />} />
             <Route path="/admin/surveys" element={<AdminSurveysPage />} />
+            <Route path="/admin/referrals" element={<AdminReferralsPage />} />
+            <Route path="/admin/corporate" element={<AdminCorporatePage />} />
           </Route>
 
           {/* Doctor */}
@@ -120,6 +131,7 @@ function App() {
             <Route path="/doctor/profile" element={<DoctorProfilePage />} />
             <Route path="/doctor/ratings" element={<DoctorRatingsPage />} />
             <Route path="/doctor/appointments/:id/discharge" element={<DoctorDischargeSummaryPage />} />
+            <Route path="/doctor/referrals" element={<DoctorReferralsPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 
@@ -139,6 +151,8 @@ function App() {
             <Route path="/patient/waitlist" element={<PatientWaitlistPage />} />
             <Route path="/patient/appointments/:id/discharge" element={<PatientDischargeSummaryPage />} />
             <Route path="/patient/surveys" element={<PatientSurveysPage />} />
+            <Route path="/patient/appointments/:id/intake" element={<PatientIntakeFormPage />} />
+            <Route path="/patient/referrals" element={<PatientReferralsPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 

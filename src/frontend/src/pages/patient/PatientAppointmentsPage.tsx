@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarCheck } from 'lucide-react';
+import { CalendarCheck, ClipboardList, CheckCircle, Clock } from 'lucide-react';
 import { cancelMyAppointment, listMyAppointments } from '../../api/patient';
+import { getIntakeForm } from '../../api/intake';
 import type { PatientAppointment } from '../../types';
 import { extractErrorMessage } from '../../api/client';
 import { formatDateTime } from '../../utils/format';
@@ -27,6 +28,8 @@ export function PatientAppointmentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // intake status: true=submitted, false=not submitted, undefined=loading/not fetched
+  const [intakeStatus, setIntakeStatus] = useState<Record<number, boolean | null>>({});
   const pageSize = 10;
 
   const load = useCallback(() => {
@@ -36,6 +39,18 @@ export function PatientAppointmentsPage() {
         setItems(r.items);
         setTotal(r.total);
         setLoading(false);
+        // Load intake status for Scheduled appointments
+        const scheduled = r.items.filter((a) => a.status === 'Scheduled');
+        scheduled.forEach((a) => {
+          getIntakeForm(a.appointment_id)
+            .then((form) => {
+              const submitted = form && form.submitted_at != null;
+              setIntakeStatus((prev) => ({ ...prev, [a.appointment_id]: submitted }));
+            })
+            .catch(() => {
+              setIntakeStatus((prev) => ({ ...prev, [a.appointment_id]: null }));
+            });
+        });
       })
       .catch((e) => { setError(extractErrorMessage(e)); setLoading(false); });
   }, [status, page]);
@@ -143,6 +158,7 @@ export function PatientAppointmentsPage() {
                 <th>Scheduled</th>
                 <th>Reason</th>
                 <th>Status</th>
+                <th>Pre-Visit Form</th>
                 <th></th>
               </tr>
             </thead>
@@ -154,6 +170,33 @@ export function PatientAppointmentsPage() {
                   <td>{a.reason}</td>
                   <td>
                     <StatusBadge status={a.status} />
+                  </td>
+                  <td>
+                    {a.status === 'Scheduled' ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        {intakeStatus[a.appointment_id] === true ? (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--color-success, #28a745)', fontSize: '0.8rem' }}>
+                            <CheckCircle size={14} /> Submitted
+                          </span>
+                        ) : intakeStatus[a.appointment_id] === false ? (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--color-warning, #f0ad4e)', fontSize: '0.8rem' }}>
+                            <Clock size={14} /> Not submitted
+                          </span>
+                        ) : (
+                          <span className="muted" style={{ fontSize: '0.8rem' }}>...</span>
+                        )}
+                        <Link
+                          to={`/patient/appointments/${a.appointment_id}/intake`}
+                          className="btn btn-ghost btn-sm"
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.2rem 0.5rem' }}
+                        >
+                          <ClipboardList size={13} />
+                          {intakeStatus[a.appointment_id] === true ? 'View / Edit' : 'Fill Form'}
+                        </Link>
+                      </div>
+                    ) : (
+                      <span className="muted" style={{ fontSize: '0.8rem' }}>—</span>
+                    )}
                   </td>
                   <td>
                     {a.status === 'Scheduled' && (
