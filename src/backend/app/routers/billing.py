@@ -125,6 +125,7 @@ def _resolve_invoice(db: Session, inv: Invoice) -> dict:
         "has_insurance_claim": inv.has_insurance_claim,
         "created_by_user_id": inv.created_by_user_id,
         "created_at": inv.created_at,
+        "paid_at": inv.paid_at,
     }
 
 
@@ -273,6 +274,9 @@ def update_invoice(
     if payload.status is not None and payload.status != inv.status:
         inv.status = payload.status
         status_changed = True
+        # OI-7: record the exact UTC timestamp when an invoice is paid
+        if payload.status == "Paid":
+            inv.paid_at = datetime.now(timezone.utc).isoformat()
     if payload.has_insurance_claim is not None:
         inv.has_insurance_claim = payload.has_insurance_claim
     if payload.line_items is not None:
