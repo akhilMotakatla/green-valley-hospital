@@ -587,6 +587,69 @@ def main() -> None:
                 db.add(new_article)
         db.commit()
 
+        # --- Batch 2 seed data (TASK-003) ---
+
+        # system_config: waitlist confirmation window (REQ-09 admin config)
+        existing_config = db.execute(
+            "SELECT config_key FROM system_config WHERE config_key = 'waitlist_confirmation_hours'"
+        ).fetchone()
+        if existing_config is None:
+            db.execute(
+                "INSERT INTO system_config (config_key, config_value, updated_at) VALUES (?, ?, ?)",
+                ("waitlist_confirmation_hours", "4", datetime.utcnow().isoformat()),
+            )
+
+        # system_config: survey delay in hours (informational; used by notification service)
+        existing_survey_config = db.execute(
+            "SELECT config_key FROM system_config WHERE config_key = 'survey_delay_hours'"
+        ).fetchone()
+        if existing_survey_config is None:
+            db.execute(
+                "INSERT INTO system_config (config_key, config_value, updated_at) VALUES (?, ?, ?)",
+                ("survey_delay_hours", "24", datetime.utcnow().isoformat()),
+            )
+        db.commit()
+
+        # corporate_packages: 2 default packages so the public /corporate page is not empty
+        pkg1_exists = db.execute(
+            "SELECT package_id FROM corporate_packages WHERE name = 'Wellness Basic'"
+        ).fetchone()
+        if pkg1_exists is None:
+            db.execute(
+                """INSERT INTO corporate_packages
+                   (name, tier_order, description, included_services_json, price_range_display, is_active, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "Wellness Basic",
+                    1,
+                    "Foundational health screening for your entire workforce. Ideal for companies looking to establish a proactive health culture.",
+                    '["Annual health screening", "Blood pressure check", "BMI assessment", "Basic blood panel", "Lifestyle counseling session"]',
+                    "$300–$500 per employee",
+                    1,
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+
+        pkg2_exists = db.execute(
+            "SELECT package_id FROM corporate_packages WHERE name = 'Executive Health'"
+        ).fetchone()
+        if pkg2_exists is None:
+            db.execute(
+                """INSERT INTO corporate_packages
+                   (name, tier_order, description, included_services_json, price_range_display, is_active, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "Executive Health",
+                    2,
+                    "Comprehensive executive health assessment with advanced diagnostics and specialist consultations. Designed for leadership teams and high-responsibility roles.",
+                    '["Full body check-up", "Advanced cardiac screening", "Oncology screening panel", "Ophthalmology exam", "Dental screening", "Nutritional assessment", "Stress management consultation", "Personalized health report"]',
+                    "$800–$1,200 per employee",
+                    1,
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+        db.commit()
+
         print("Seed complete. Demo accounts:")
         for spec in DEMO_USERS:
             print(f"  {spec['role']:17s} {spec['email']:38s} {spec['password']}")
