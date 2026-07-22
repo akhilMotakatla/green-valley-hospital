@@ -34,6 +34,7 @@ import { AdminConfigPage } from './pages/admin/AdminConfigPage';
 import { AdminSurveysPage } from './pages/admin/AdminSurveysPage';
 import { AdminReferralsPage } from './pages/admin/AdminReferralsPage';
 import { AdminCorporatePage } from './pages/admin/AdminCorporatePage';
+import { AdminAnalyticsPage } from './pages/admin/AdminAnalyticsPage';
 
 import { DoctorAppointmentsPage } from './pages/doctor/DoctorAppointmentsPage';
 import { DoctorAvailabilityPage } from './pages/doctor/DoctorAvailabilityPage';
@@ -115,6 +116,7 @@ function App() {
             <Route path="/admin/surveys" element={<AdminSurveysPage />} />
             <Route path="/admin/referrals" element={<AdminReferralsPage />} />
             <Route path="/admin/corporate" element={<AdminCorporatePage />} />
+            <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
           </Route>
 
           {/* Doctor */}
